@@ -252,7 +252,8 @@ class Publisher:
         """
         try:
             export_selection(
-                self._publish_path, stripNamespaces=True, **self._get_mayausd_kwargs()
+                self._publish_path,
+                **{"stripNamespaces": True, **self._get_mayausd_kwargs()},
             )
         except Exception as exc:
             log.exception("Maya USD export failed")

@@ -16,8 +16,6 @@ from pipe.dcc.substance_painter.publish.types import (
 )
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
-_PREVIEW_SIZE_LOG2 = 10
-
 
 def channel_export_name(channel: sp.textureset.Channel) -> str:
     label_attr = getattr(channel, "label", None)
@@ -203,9 +201,10 @@ def _preview_maps(export_settings: TexSetExportSettings) -> list[dict[str, objec
     """The render maps again as 8-bit jpegs, one per UDIM, for UsdPreviewSurface.
 
     Same map names as the `.tex` set, so Houdini finds both with one filename
-    rule and the viewport shows the textures the renderer uses.
+    rule and the viewport shows the textures the renderer uses. Painter writes
+    them at the render size; the export scales them down to 1k afterwards.
     """
-    size_log2 = min(export_settings.resolution, _PREVIEW_SIZE_LOG2)
+    size_log2 = export_settings.resolution
 
     def jpeg(*, dithering: bool = False) -> dict[str, object]:
         return {

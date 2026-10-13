@@ -22,11 +22,13 @@ from pipe.core.asset.paths import (
     AssetPaths,
     production_relative_identifier,
 )
+from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import (
     child_source_problem,
     child_variants,
     variant_list,
 )
+from pipe.core.assembly.textures import link_used_textures
 from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
@@ -109,7 +111,7 @@ def run_headless_publish(
         placed = child_variants(AssetPaths(root).pieces_layer)
         for child_root, variants in placed.items():
             log.info("Publishing %s before its assembly %s", child_root.name, root.name)
-            child = _publish_child(child_root, frozenset(variants))
+            child = _publish_child(child_root, frozenset(variants), root)
             children.append(child)
             if child["errors"]:
                 return _failed_child(root, child, children)
@@ -133,18 +135,20 @@ def run_headless_publish(
 
 
 def _publish_child(
-    child_root: Path, placed_variants: frozenset[str]
+    child_root: Path, placed_variants: frozenset[str], assembly_root: Path
 ) -> HeadlessPublishResult:
     """Publish one piece, regenerating its managed graph when that is the remedy."""
     # Refusing first keeps a renamed or deleted child from being made empty.
     problem = child_source_problem(child_root, placed_variants)
     if problem is not None:
-        child = _empty_result(
-            child_root, variant=DEFAULT_GEOMETRY_VARIANT, publish=True
-        )
-        child["asset_name"] = child_root.name
-        _error(child, "ChildSourceMissing", problem)
-        return _finalize(child)
+        return _refused_child(child_root, "ChildSourceMissing", problem)
+    # A repaint or a piece edit may have moved the tiles a variant uses.
+    try:
+        for variant in sorted(placed_variants):
+            link_used_textures(child_root, variant, assembly_root)
+    except (AssemblyError, OSError) as error:
+        log.exception("Could not link the textures of %s", child_root.name)
+        return _refused_child(child_root, "ChildTexturesNotLinked", str(error))
 
     def run(*, regen: bool) -> HeadlessPublishResult:
         return _run_one(
@@ -161,6 +165,13 @@ def _publish_child(
         log.info("Regenerating the managed variants of %s", child_root.name)
         child = run(regen=True)
     return child
+
+
+def _refused_child(child_root: Path, code: str, message: str) -> HeadlessPublishResult:
+    child = _empty_result(child_root, variant=DEFAULT_GEOMETRY_VARIANT, publish=True)
+    child["asset_name"] = child_root.name
+    _error(child, code, message)
+    return _finalize(child)
 
 
 def _needs_regeneration(child: HeadlessPublishResult) -> bool:

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import substance_painter as sp
-from Qt import QtWidgets
+from Qt import QtCore, QtGui, QtWidgets
 
 if TYPE_CHECKING:
     import typing
@@ -37,9 +37,13 @@ from pipe.core.texture import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
 
-# Painter writes the 1k UsdPreviewSurface maps as jpeg; every render map is png
+# Painter writes the UsdPreviewSurface maps as jpeg; every render map is png
 # or exr, so the extension alone separates the two.
 _PREVIEW_SUFFIX = ".jpeg"
+# Painter writes every map at the texture set's resolution, ignoring a map's
+# own sizeLog2, so previews are brought down to 1k after export.
+_PREVIEW_MAX_SIZE = 1024
+_PREVIEW_JPEG_QUALITY = 95
 
 _NOT_OCIO_MESSAGE = (
     "This project uses Painter's Legacy or Adobe ACE color management, which "
@@ -53,6 +57,24 @@ class TextureExportError(Exception):
     """An export step failed; the message is shown to the artist as is."""
 
     error_code = "TEXTURE_EXPORT_FAILED"
+
+
+def _cap_preview_size(path: Path) -> None:
+    """Scale the jpeg at `path` down to 1k in place, if Painter wrote it larger."""
+    image = QtGui.QImage(str(path))
+    if image.isNull():
+        raise OSError(f"Could not read the preview jpeg {path}.")
+    if max(image.width(), image.height()) <= _PREVIEW_MAX_SIZE:
+        return
+    scaled = image.scaled(
+        _PREVIEW_MAX_SIZE,
+        _PREVIEW_MAX_SIZE,
+        QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+        QtCore.Qt.TransformationMode.SmoothTransformation,
+    )
+    # No format: Qt reads it from the suffix, and the bindings disagree on its type.
+    if not scaled.save(str(path), None, _PREVIEW_JPEG_QUALITY):
+        raise OSError(f"Could not write the 1k preview jpeg {path}.")
 
 
 def _preview_shares_render_name(planned: list[str]) -> bool:
@@ -358,14 +380,16 @@ class Exporter:
     def _move_previews(
         self, exported_textures: dict[tuple[str, str], list[str]]
     ) -> list[list[str]]:
-        """Move the exported preview jpegs from `_src` into `_preview`."""
+        """Move the exported preview jpegs from `_src` into `_preview`, at most 1k."""
         render_sources: list[list[str]] = []
         for textures in exported_textures.values():
             kept: list[str] = []
             for texture in textures:
                 path = Path(texture)
                 if path.suffix.lower() == _PREVIEW_SUFFIX:
-                    path.replace(self._preview_path / path.name)
+                    preview = self._preview_path / path.name
+                    path.replace(preview)
+                    _cap_preview_size(preview)
                 else:
                     kept.append(texture)
             render_sources.append(kept)

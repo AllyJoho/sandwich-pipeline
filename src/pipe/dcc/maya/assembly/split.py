@@ -10,11 +10,7 @@ from pathlib import Path
 from maya import cmds as mc
 from pxr import Gf, Usd, UsdGeom
 
-from pipe.core.asset.paths import (
-    DEFAULT_GEOMETRY_VARIANT,
-    AssetPaths,
-    production_relative_identifier,
-)
+from pipe.core.asset.paths import production_relative_identifier
 from pipe.core.assembly.model import AssemblyError, Piece, PieceTarget
 from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
@@ -27,6 +23,7 @@ from pipe.core.assembly.normalize import (
 )
 from pipe.core.assembly.pieces import stamp_assembly
 from pipe.core.assembly.plan import existing_model_problem, scale_problem
+from pipe.core.assembly.textures import link_used_textures, texture_link_problem
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
     scene_units_problem,
@@ -61,8 +58,10 @@ def split_piece(piece: Piece, target: PieceTarget, *, assembly_root: Path) -> No
     scale = _bakeable_scale(piece)
     bounds_before = _piece_bounds(piece)
 
-    _link_textures(target, assembly_root)
+    _refuse_own_textures(target)
     normalization = _install_source_layer(piece, target, scale, assembly_root)
+    # After the source layer: the links follow the tiles its UVs use.
+    link_used_textures(target.asset_root, target.variant, assembly_root)
     placement = placement_for(piece.world_matrix, normalization)
 
     stage = ensure_assembly_stage()
@@ -112,24 +111,10 @@ def _piece_bounds(piece: Piece) -> Gf.Range3d:
     return world_point_bounds(piece.node)
 
 
-def _link_textures(target: PieceTarget, assembly_root: Path) -> None:
-    """Make the child's textures for this variant the assembly's."""
-    link = AssetPaths(target.asset_root).publish_textures_variant_dir(target.variant)
-    textures = AssetPaths(assembly_root).publish_textures_variant_dir(
-        DEFAULT_GEOMETRY_VARIANT
-    )
-    # Relative, so the pair survives a move together and either mount of /job.
-    relative = os.path.relpath(textures, link.parent)
-    if link.is_symlink() and os.readlink(link) == relative:
-        return
-    if link.exists() or link.is_symlink():
-        raise AssemblyError(
-            f"'{target.asset_name}' already has its own textures at {link}, but a "
-            f"split piece shares its assembly's ({textures}). Split under a "
-            "different name, or delete that folder if it is a leftover."
-        )
-    link.parent.mkdir(parents=True, exist_ok=True)
-    os.symlink(relative, link)
+def _refuse_own_textures(target: PieceTarget) -> None:
+    problem = texture_link_problem(target.asset_root, target.variant)
+    if problem is not None:
+        raise AssemblyError(problem)
 
 
 def _install_source_layer(

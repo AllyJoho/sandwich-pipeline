@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pipe.core.color import ocio_env_vars
 from pipe.core.util.paths import (
+    get_production_path,
     get_shared_telemetry_spool_dir,
     resolve_mapped_path,
 )
@@ -14,6 +15,8 @@ from env import Executables
 from pipe.framework.launcher import Launcher
 
 log = logging.getLogger(__name__)
+
+OFX_PLUGINS = ("spektrafilm-0.3.12", "ntsc-rs-0.9.6")
 
 
 class NukeLauncher(Launcher):
@@ -34,6 +37,9 @@ class NukeLauncher(Launcher):
             # survive the repo's location moving.
             "DCC_NUKE_THIRD_PARTY": str(this_path.parent / "third_party"),
             "NUKE_PATH": str(resolve_mapped_path(this_path.parent / "site")),
+            "OFX_PLUGIN_PATH": os.pathsep.join(
+                str(get_production_path() / "ofx" / name) for name in OFX_PLUGINS
+            ),
             **ocio_env_vars(),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),

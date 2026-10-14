@@ -20,9 +20,16 @@ from pipe.dcc.houdini.tractor import SendRefused, paths
 
 ASRGBA = "driver:parameters:openexr:asrgba"
 
-# RenderMan's symmetric multiframe denoiser.
-TOPOLOGY = "${RMANTREE}/lib/denoise/full_w7_4sv2_sym_gen2.topo"
-PARAMETERS = "${RMANTREE}/lib/denoise/20970-renderman.param"
+# RenderMan's symmetric denoisers as <topology, parameters>, paired as in
+# $RMANTREE/lib/python3.11/site-packages/denoise/denoiser/core.py
+SINGLE_FRAME = (
+    "${RMANTREE}/lib/denoise/full_w1_5s_sym_gen2.topo",
+    "${RMANTREE}/lib/denoise/20973-renderman.param",
+)
+CROSS_FRAME = (
+    "${RMANTREE}/lib/denoise/full_w7_4sv2_sym_gen2.topo",
+    "${RMANTREE}/lib/denoise/20970-renderman.param",
+)
 
 # The vars Denoise adds that its config reads. The beauty is read as R, G, B,
 # so it isn't among them.
@@ -32,12 +39,18 @@ PASSES = frozenset(
 )
 
 
-def config(vars: list[str]) -> dict:
+def config(vars: list[str], frames: int) -> dict:
     """denoise_batch's config for a product with these vars.
 
     The finished beauty is denoised diffuse plus denoised specular, which
     denoise_batch sums into R, G, B.
+
+    If more than one frame, uses cross-frame denoise. Otherwise, uses
+    single-frame denoise.
     """
+
+    topology, parameters = CROSS_FRAME if frames > 1 else SINGLE_FRAME
+
     outputs: dict[str, list[dict]] = {
         "albedo": [],
         "alpha": [_output("A", "A")],
@@ -77,8 +90,8 @@ def config(vars: list[str]) -> dict:
             "sample_count": _read("sampleCount"),
             "frame-include": "${FrameInclude}",
             "frame-exclude": "${FrameExclude}",
-            "topology": TOPOLOGY,
-            "parameters": PARAMETERS,
+            "topology": topology,
+            "parameters": parameters,
             "asymmetry": 0.0,
             "overwrite": "OverwriteChannels",
             "progress": True,

@@ -12,6 +12,9 @@ from .progress import RigBuildProgressManager
 
 log = logging.getLogger(__name__)
 
+RIG_ROOT: str = "|rig"
+ASSET_ID_ATTR: str = "asset_id"
+
 
 @dataclass
 class RigDefinition:
@@ -75,6 +78,13 @@ def redirect_external_logger(
         external_logger.propagate = original_propagate
 
 
+def add_rig_asset_id(asset_id: str):
+    asset_id_full_attr = f"{RIG_ROOT}.{ASSET_ID_ATTR}"
+    if not cmds.objExists(asset_id_full_attr):
+        cmds.addAttr(RIG_ROOT, longName=ASSET_ID_ATTR, dataType="string")
+    cmds.setAttr(asset_id_full_attr, asset_id, type="string")
+
+
 class RigBuilder:
     def __init__(self) -> None:
         self._progress_slot: Callable[[float], None] | None = None
@@ -117,5 +127,6 @@ class RigBuilder:
             )
         if build_result is False:
             return False  # Early return to avoid finishing the progress bar
+        add_rig_asset_id(rig.name)
         progress_manager.update_progress_with_step(1)
         return build_result

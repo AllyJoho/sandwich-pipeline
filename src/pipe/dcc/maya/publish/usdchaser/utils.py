@@ -18,10 +18,9 @@ if TYPE_CHECKING:
         def GetNumTimeSamples(self) -> int: ...
 
 
-from pipe.core.util.paths import get_production_path
-
 from pipe.core.shotgrid import Asset
 from pipe.core.struct.timeline import Timeline
+from pipe.core.util.paths import get_production_path
 
 from ..anim_index import index_key
 
@@ -291,7 +290,7 @@ def remove_namespace(
 
 def split_by_namespace(
     stage: Usd.Stage, suffix: str, path_dag_map: Mapping[Sdf.Path, MDagPath]
-) -> dict[str, Sdf.Layer]:
+) -> dict[str, tuple[str, Sdf.Layer]]:
     """One saved layer per rig, keyed by `index_key`. Leaves the root layer as
     it is — see `clear_root_prims`."""
     root_layer = stage.GetRootLayer()
@@ -312,7 +311,7 @@ def split_by_namespace(
         else:
             namespace_prims[namespace].add(prim)
 
-    layers: dict[str, Sdf.Layer] = dict()
+    layers: dict[str, tuple[str, Sdf.Layer]] = dict()
     for namespace in namespaces:  # Create a layer for each rig (namespace)
         layer_name = index_key(namespace)
         layer_path = str(root_layer_path.parent / f"{layer_name}.{suffix}.usd")
@@ -333,7 +332,7 @@ def split_by_namespace(
             raise RuntimeError(f"Could not remove namespace on layer `{layer_name}`")
 
         layer.Save()
-        layers.update({layer_name: layer})
+        layers.update({namespace: (layer_name, layer)})
 
     return layers
 

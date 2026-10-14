@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import attrs
 import mayaUsd.lib as mayaUsdLib
-from pxr import Usd
+from maya.api.OpenMaya import MSelectionList
 
 from pipe.core.asset import paths_for_asset
 
@@ -34,6 +34,8 @@ from .utils import (
 if TYPE_CHECKING:
     from typing import Protocol
 
+    from pxr import Usd
+
     class TimeSampleble(Protocol):
         def GetTimeSamples(self) -> list[float]: ...
 
@@ -51,6 +53,9 @@ log = logging.getLogger(__name__)
 # A rig's frames from the shot's head on are written to `<rig>.anim.usd`, which
 # `<rig>.usd` stitches to its preroll.
 _BODY_SUFFIX = "anim"
+
+RIG_ROOT_NODE: str = "rig"
+ASSET_ID_ATTR: str = "asset_id"
 
 
 class ExportChaserMode(IntEnum):
@@ -123,18 +128,18 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         # is still on disk. Stitching is the step that raises on a rig whose
         # geometry does not meet the convention, and a rig that has never
         # resolved to a ShotGrid asset is indexed unbound rather than refused.
-        published = [
-            (
-                name,
+        published = {
+            namespace: (
+                layer_name,
                 Path(
                     split_preroll(
-                        layer, name, RIG_GEO_PATH, self._chaser_args.timeline
+                        layer, layer_name, RIG_GEO_PATH, self._chaser_args.timeline
                     ).realPath
                 ),
-                _rig_reference(conn, name),
+                _rig_reference(conn, namespace),
             )
-            for name, layer in layers.items()
-        ]
+            for namespace, (layer_name, layer) in layers.items()
+        }
 
         for kept in self._chaser_args.keep:
             if kept.rig is None:
@@ -149,7 +154,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         # nothing below may touch the scene, ShotGrid, or the filesystem.
         root_layer = self._stage.GetRootLayer()
         clear_root_prims(root_layer)
-        for name, anim_layer, rig in published:
+        for name, anim_layer, rig in published.values():
             author_rig_entry(root_layer, name, anim_layer, rig)
         for kept in self._chaser_args.keep:
             author_rig_entry(root_layer, kept.name, kept.anim_layer, kept.rig)
@@ -169,12 +174,23 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         flatten_camera(self._stage, SHOT_CAM_PATH)
 
 
-def _rig_reference(conn: ShotGrid, name: str) -> RigReference | None:
+def _rig_reference(
+    conn: ShotGrid,
+    namespace: str,
+) -> RigReference | None:
     """The published rig a freshly exported rig's animation belongs to."""
-    # Trailing digits distinguish two of the same rig in one scene.
-    # TODO: Make this more robust by querying for asset metadata on the rig
-    # instead of guessing from the namespace.
-    rig_name = re.sub(r"\d+$", "", name)
+    try:
+        sel: MSelectionList = MSelectionList()
+        sel.add(f"{namespace}:{RIG_ROOT_NODE}.{ASSET_ID_ATTR}")
+        asset_id_plug = sel.getPlug(0)
+        rig_name = asset_id_plug.asString()
+    except RuntimeError:
+        # We couldn't retrieve the asset id from the rig, fallback to the namespace.
+        rig_name = re.sub(r"\d+$", "", namespace)
+        log.warning(
+            "Couldn't retrieve the asset name from the rig's metadata, "
+            "falling back to using the rig namespace to resolve the asset name."
+        )
     try:
         asset_paths = paths_for_asset(conn.get_asset(name=rig_name))
     except Exception:
@@ -182,7 +198,7 @@ def _rig_reference(conn: ShotGrid, name: str) -> RigReference | None:
             "[chaser] could not find a rig asset named '%s' for the rig '%s'. "
             "Please talk to the rigging team and let them know.",
             rig_name,
-            name,
+            namespace,
         )
         return None
     return RigReference(

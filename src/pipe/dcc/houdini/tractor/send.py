@@ -346,7 +346,7 @@ def _write_denoise(
     folder: Path, product: Usd.Prim, frames: list[int]
 ) -> commands.Denoise:
     """Write denoise.json and return what the denoise tasks need."""
-    config = denoise.config(denoise.var_names(product), len(frames))
+    config = denoise.config(denoise.var_kinds(product), len(frames))
     denoise.write_config(folder, config)
     return commands.Denoise(product=product.GetName())
 

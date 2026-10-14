@@ -184,12 +184,13 @@ def _rig_reference(
         sel.add(f"{namespace}:{RIG_ROOT_NODE}.{ASSET_ID_ATTR}")
         asset_id_plug = sel.getPlug(0)
         rig_name = asset_id_plug.asString()
-    except RuntimeError:
+    except RuntimeError as exc:
         # We couldn't retrieve the asset id from the rig, fallback to the namespace.
         rig_name = re.sub(r"\d+$", "", namespace)
         log.warning(
             "Couldn't retrieve the asset name from the rig's metadata, "
-            "falling back to using the rig namespace to resolve the asset name."
+            f"falling back to using the rig namespace '{namespace}' to resolve the asset name.",
+            exc_info=exc,
         )
     try:
         asset_paths = paths_for_asset(conn.get_asset(name=rig_name))

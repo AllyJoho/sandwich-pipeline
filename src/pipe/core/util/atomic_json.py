@@ -33,7 +33,7 @@ def write_json_atomic(path: Path, data: object) -> None:
 
 
 @contextmanager
-def json_write_lock(path: Path) -> Generator[None]:
+def json_write_lock(path: Path) -> Generator[None, None, None]:
     """Hold an exclusive cross-process lock keyed on `path` for the block.
 
     The lock is a sibling `<name>.lock` file. `filelock` blocks until the

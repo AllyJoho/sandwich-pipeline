@@ -159,7 +159,7 @@ def export_mov(group):
 
 
 @contextmanager
-def proxy_off() -> Generator[None]:
+def proxy_off() -> Generator[None, None, None]:
     """Proxy reads each 1080 render at half size, which would halve the movie's
     detail; the review Reformat shrinks the full frame instead."""
     root = nuke.root()

@@ -247,7 +247,7 @@ def _pass_label(index: int, turnaround_pass: TurnaroundPass) -> str:
 
 
 @contextmanager
-def _preserved_current_time() -> Generator[None]:
+def _preserved_current_time() -> Generator[None, None, None]:
     current_time = int(mc.currentTime(query=True))
     try:
         yield
@@ -256,7 +256,7 @@ def _preserved_current_time() -> Generator[None]:
 
 
 @contextmanager
-def _held_animation() -> Generator[None]:
+def _held_animation() -> Generator[None, None, None]:
     """Freeze the scene's existing animation on the current pose."""
     blocked = [
         curve

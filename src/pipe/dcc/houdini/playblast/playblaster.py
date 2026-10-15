@@ -223,7 +223,7 @@ def _applied_viewport_camera(
 @contextmanager
 def _clean_viewport(
     scene_viewer: hou.SceneViewer, viewport: hou.GeometryViewport
-) -> Generator[None]:
+) -> Generator[None, None, None]:
     vp_state = _apply_viewport_overrides(viewport)
     sv_state = (
         _apply_scene_viewer_overrides(scene_viewer) if HIDE_CONSTRUCTION_PLANE else None

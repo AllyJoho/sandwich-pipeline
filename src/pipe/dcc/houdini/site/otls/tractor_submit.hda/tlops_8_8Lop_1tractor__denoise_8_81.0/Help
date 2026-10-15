@@ -6,7 +6,7 @@ Wire it below Tractor Configure.
 
 It adds the render vars the denoiser reads to the render product that holds the beauty. The farm renders that product into the version's `tmp` folder, denoises each frame, and writes the finished frame into the product's folder. The job removes `tmp` when it finishes.
 
-The denoiser reads three frames either side of each frame, so the layer must render every frame of its range. It works with RenderMan only.
+The denoiser reads three frames either side of each frame, so the layer must render every frame of its range. A one-frame layer is denoised on its own. It works with RenderMan only.
 
 LPEs are denoised based on the type of the first bounce after the camera. Starting with a diffuse bounce (such as `CD...` or `C<.D'group'>...`) uses the diffuse denoiser, and starting with a specular one uses the specular denoiser. Other LPEs go through unchanged.
 

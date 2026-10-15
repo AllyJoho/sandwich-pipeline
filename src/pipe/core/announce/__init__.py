@@ -17,6 +17,7 @@ from .shotgrid import send_note
 log = logging.getLogger(__name__)
 
 DOWNSTREAM: dict[str, list[str]] = {
+    "model": ["Rigging", "Shading"],
     "rig": ["Animation"],
     "anim": ["CFX", "FX", "Lighting"],
     "cam": ["Animation", "Lighting"],
@@ -36,6 +37,7 @@ def announce_publish(
     deliverable: Shot | Asset,
     deliverable_name: str | None = None,
     department: str,
+    steps: list[str] | None = None,
     artist: str | None = None,
     path: Path,
     announce_path: bool = False,
@@ -48,10 +50,10 @@ def announce_publish(
 
     `action` is what the artist did when it wasn't a publish, as Make Current's
     `moved to v003` is. `detail` is free text for the message, such as which rigs
-    were published.
+    were published. `steps` tells only those of the department's downstream.
     Returns one line per channel, or none for a department with no downstream.
     """
-    steps = DOWNSTREAM[department]
+    steps = DOWNSTREAM[department] if steps is None else steps
     if not steps:
         return []
     resolved_artist = artist if artist else resolve_artist_display_name()

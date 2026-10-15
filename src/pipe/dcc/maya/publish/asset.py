@@ -8,6 +8,7 @@ from typing import Any, Sequence, cast
 
 import maya.cmds as mc
 from pipe.core import telemetry
+from pipe.core.announce import DOWNSTREAM, announce_publish
 from pipe.core.asset import (
     AssetPaths,
     asset_owner_for,
@@ -30,6 +31,7 @@ from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
 from Qt.QtWidgets import (
     QBoxLayout,
+    QCheckBox,
     QComboBox,
     QDialogButtonBox,
     QHBoxLayout,
@@ -199,8 +201,29 @@ class VersionTitleWidget:
         return note or None
 
 
+class _TellDownstreamControls:
+    """One `Tell <Step>` box per department downstream of modeling, off each time."""
+
+    _layout: QBoxLayout
+    _tell_boxes: dict[str, QCheckBox]
+
+    def _init_tell_controls(self) -> None:
+        self._tell_boxes = {}
+        for step in DOWNSTREAM["model"]:
+            box = QCheckBox(f"Tell {step}", cast(QWidget, self))
+            self._tell_boxes[step] = box
+            insert_at = max(self._layout.count() - 1, 0)
+            self._layout.insertWidget(insert_at, box)
+
+    def get_told_steps(self) -> list[str]:
+        return [step for step, box in self._tell_boxes.items() if box.isChecked()]
+
+
 class PublishAssetOptionsDialog(
-    FilteredListDialog, _PublishAssetVariantControls, VersionTitleWidget
+    FilteredListDialog,
+    _PublishAssetVariantControls,
+    VersionTitleWidget,
+    _TellDownstreamControls,
 ):
     """Publish dialog for the current scene asset (read-only asset name)."""
 
@@ -236,6 +259,7 @@ class PublishAssetOptionsDialog(
 
         self._init_variant_controls()
         self._init_version_title_controls()
+        self._init_tell_controls()
         self._version_title_field.textChanged.connect(self._refresh_accept)
 
         insert_at = max(self._layout.count() - 1, 0)
@@ -270,7 +294,10 @@ class PublishAssetOptionsDialog(
 
 
 class PublishAssetPickerDialog(
-    FilteredListDialog, _PublishAssetVariantControls, VersionTitleWidget
+    FilteredListDialog,
+    _PublishAssetVariantControls,
+    VersionTitleWidget,
+    _TellDownstreamControls,
 ):
     """Fallback dialog that lets users choose the asset to publish."""
 
@@ -291,6 +318,7 @@ class PublishAssetPickerDialog(
         self._list_widget.setToolTip("Select the asset to publish.")
         self._init_variant_controls()
         self._init_version_title_controls()
+        self._init_tell_controls()
         self._version_title_field.textChanged.connect(self._refresh_accept)
         self._populate_geo_var(None)
         insert_at = max(self._layout.count() - 1, 0)
@@ -778,9 +806,29 @@ class AssetPublisher(Publisher):
 
             MessageDialog(
                 self._window,
-                self._get_confirm_message(),
+                "\n\n".join([self._get_confirm_message(), *self._announce()]),
                 "Export Complete",
             ).exec_()
+
+    def _announce(self) -> list[str]:
+        """Tell the departments the artist ticked. Runs after the export so it
+        can only add lines to the result, never fail the publish."""
+        steps = cast(_TellDownstreamControls, self._dialog).get_told_steps()
+        if not steps:
+            return []
+        title = self._version_title or ""
+        if self._assembly_stage is None:
+            title = f"{self._geo_variant}: {title}"
+        detail = f"{title}: {self._version_note}" if self._version_note else title
+        lines = announce_publish(
+            self._conn,
+            deliverable=cast(Asset, self._entity),
+            department="model",
+            steps=steps,
+            path=self._publish_path,
+            detail=detail,
+        )
+        return ["\n".join(lines)]
 
     def _select_asset_publish_target_or_cancel(self, entity_list: list[str]) -> bool:
         """Run the asset-publisher dialog and populate `self._selected_item`/`self._entity`.

@@ -7,10 +7,9 @@ The config names layers as RenderMan writes them, not as the vars are named:
 with the product's asrgba on, the alpha var `a` is written as `A`, and the
 beauty `Ci` as `R, G, B`.
 
-The denoiser filters each pass with a filter fitted to that pass's input, so an
-LPE is denoised in the pass its first bounce matches: diffuse or specular. An
-LPE of both, such as SKD Render Layer's per-light AOVs, is rendered as two
-halves that are denoised apart and summed back into its own layer.
+The denoiser filters each diffuse and specular pass. An LPE of both, such as
+SKD Render Layer's per-light AOVs, is rendered as two halves that are
+denoised apart and summed back into its own layer.
 """
 
 from __future__ import annotations
@@ -29,8 +28,6 @@ SOURCE_NAME = "sourceName"
 SOURCE_TYPE = "sourceType"
 LPE = "lpe"
 
-# RenderMan's symmetric denoisers as <topology, parameters>, paired as in
-# $RMANTREE/lib/python3.11/site-packages/denoise/denoiser/core.py
 SINGLE_FRAME = (
     "${RMANTREE}/lib/denoise/full_w1_5s_sym_gen2.topo",
     "${RMANTREE}/lib/denoise/20973-renderman.param",

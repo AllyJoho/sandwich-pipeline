@@ -35,19 +35,7 @@ def _default_usd_path():
     if script == "Root":
         return ""
     # A comp is `<shot>/comp/<shot>.nk`.
-    try:
-        return str(current_layer_path(Path(script).parents[1], DEPARTMENT))
-    except Exception:
-        # Script lives outside the pipeline; leave the prompt empty.
-        return ""
-
-
-def _prompt_usd_path():
-    return nuke.getFilename(
-        "Select lighting USD",
-        "*.usd *.usda *.usdc *.usdz",
-        default=_default_usd_path(),
-    )
+    return str(current_layer_path(Path(script).parents[1], DEPARTMENT))
 
 
 def run():
@@ -57,7 +45,11 @@ def run():
         return
     read = selected[0]
 
-    usd_path = _prompt_usd_path()
+    usd_path = nuke.getFilename(
+        "Select lighting USD",
+        "*.usd *.usda *.usdc *.usdz",
+        default=_default_usd_path(),
+    )
     if not usd_path:
         return
 

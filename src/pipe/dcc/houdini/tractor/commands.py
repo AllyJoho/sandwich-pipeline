@@ -133,7 +133,7 @@ def denoise(layer: Layer, product: str, frame: int) -> str:
     return "\n".join(
         [
             f"export FrameInclude={window[0]}-{window[-1]}",
-            f"export FrameExclude={','.join(exclude) or -1}",
+            f"export FrameExclude={','.join(exclude)}",
             f"export InputFile={q(str(raw / '####.exr'))}",
             f"export OutputFile={q(str(denoised.parent / '####.exr'))}",
             f"for f in {' '.join(q(str(p)) for p in inputs)}; do",

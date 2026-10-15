@@ -6,7 +6,7 @@
     label	"Tractor Denoise"
 
     help {
-	"Denoises the layer's beauty on the farm with RenderMan's multiframe denoiser, which reads three frames either side of each frame. Wire it between Configure and Encode or Submit."
+	"Denoises the layer's beauty on the farm with RenderMan's denoiser, which reads three frames either side of each frame, or a one-frame layer's frame alone. Wire it between Configure and Encode or Submit."
     }
 
     inputlabel	1	"Input Stage"

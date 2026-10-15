@@ -235,7 +235,7 @@ def _layer(chain: Chain, version_of: Callable[[Path], int | None]) -> commands.L
         folder,
         frames,
         commands.Render(husk=parms.husk(configure), folders=written),
-        _write_denoise(folder, denoised) if denoised else None,
+        _write_denoise(folder, denoised, frames) if denoised else None,
         _encode(encode, configure, settings, products, denoised) if encode else None,
     )
 
@@ -342,9 +342,11 @@ def _sent_version(current: Path) -> int | None:
     )
 
 
-def _write_denoise(folder: Path, product: Usd.Prim) -> commands.Denoise:
+def _write_denoise(
+    folder: Path, product: Usd.Prim, frames: list[int]
+) -> commands.Denoise:
     """Write denoise.json and return what the denoise tasks need."""
-    denoise.write_config(folder, denoise.config(denoise.var_names(product)))
+    denoise.write_config(folder, denoise.config(denoise.bounces(product), frames))
     return commands.Denoise(product=product.GetName())
 
 

@@ -30,12 +30,24 @@ def _collect_light_layer_names(usd_path):
     return names
 
 
-def _resolve_usd_path():
+def _default_usd_path():
     script = nuke.root().name()
     if script == "Root":
-        raise RuntimeError("Save the Nuke script before running this tool.")
+        return ""
     # A comp is `<shot>/comp/<shot>.nk`.
-    return str(current_layer_path(Path(script).parents[1], DEPARTMENT))
+    try:
+        return str(current_layer_path(Path(script).parents[1], DEPARTMENT))
+    except Exception:
+        # Script lives outside the pipeline; leave the prompt empty.
+        return ""
+
+
+def _prompt_usd_path():
+    return nuke.getFilename(
+        "Select lighting USD",
+        "*.usd *.usda *.usdc *.usdz",
+        default=_default_usd_path(),
+    )
 
 
 def run():
@@ -45,10 +57,8 @@ def run():
         return
     read = selected[0]
 
-    try:
-        usd_path = _resolve_usd_path()
-    except RuntimeError as e:
-        nuke.message(str(e))
+    usd_path = _prompt_usd_path()
+    if not usd_path:
         return
 
     if not os.path.exists(usd_path):

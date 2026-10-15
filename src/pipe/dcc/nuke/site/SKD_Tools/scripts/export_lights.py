@@ -4,16 +4,22 @@ import json
 import nuke
 
 
-def run():
-    root = nuke.root()
-    script_path = root.name()
-
+def _default_output_path():
+    script_path = nuke.root().name()
     if script_path == "Root":
-        nuke.message("Please save the Nuke script first.")
-        return
+        return ""
+    return os.path.join(os.path.dirname(script_path), "light_edits.json")
 
-    directory = os.path.dirname(script_path)
-    output_path = os.path.join(directory, "light_edits.json")
+
+def run():
+    output_path = nuke.getFilename(
+        "Export light grades to",
+        "*.json",
+        default=_default_output_path(),
+        type="save",
+    )
+    if not output_path:
+        return
 
     data = {}
 

@@ -44,16 +44,14 @@ PASSES = frozenset(
     | {"diffuse", "diffuse_mse", "specular", "specular_mse"}
 )
 
-DIFFUSE = "diffuse"
-SPECULAR = "specular"
 # A combined LPE's halves are named after it with these suffixes, and both are
 # written back into its layer.
-HALVES = {DIFFUSE: "_dnDiff", SPECULAR: "_dnSpec"}
+HALVES = {"diffuse": "_dnDiff", "specular": "_dnSpec"}
 
 # The first bounce after the camera: D or S, alone or as an event such as
 # <.D'group'> or <RS>, optionally opening a group.
-_FIRST_DIFFUSE = re.compile(r"\(?(D|<[.RT]D)")
-_FIRST_SPECULAR = re.compile(r"\(?(S|<[.RT]S)")
+_FIRST_BOUNCE = re.compile(r"C\(?(?:<[.RT])?([DS])")
+_BOUNCES = {"D": "diffuse", "S": "specular"}
 
 # The combined LPEs SKD Render Layer writes, each as <diffuse half, specular
 # half>. Per light: everything from the light group's lights.
@@ -70,20 +68,14 @@ def _lpe(var: Usd.Prim) -> str | None:
     return source.removeprefix("lpe:").rpartition(";")[2]
 
 
-def lpe_kind(var: Usd.Prim) -> str | None:
+def _first_bounce(var: Usd.Prim) -> str | None:
     """The pass an LPE var is denoised in, by its first bounce, if one fits."""
-    expression = _lpe(var)
-    if not expression or not expression.startswith("C"):
-        return None
-    if _FIRST_DIFFUSE.match(expression, 1):
-        return DIFFUSE
-    if _FIRST_SPECULAR.match(expression, 1):
-        return SPECULAR
-    return None
+    found = _FIRST_BOUNCE.match(_lpe(var) or "")
+    return _BOUNCES[found[1]] if found else None
 
 
-def halves(var: Usd.Prim) -> tuple[str, str] | None:
-    """A combined LPE var's diffuse and specular halves, if it is one Send can split."""
+def _halves(var: Usd.Prim) -> tuple[str, str] | None:
+    """A combined LPE var's diffuse and specular halves, if Denoise can split it."""
     expression = _lpe(var)
     if not expression:
         return None
@@ -97,45 +89,44 @@ def halves(var: Usd.Prim) -> tuple[str, str] | None:
     return None
 
 
-def config(vars: list[tuple[str, str | None]], frames: int) -> dict:
-    """denoise_batch's config for a product with these vars, as <name, LPE kind>.
+def config(bounces: dict[str, str | None], frames: list[int]) -> dict:
+    """denoise_batch's config for a product with these vars, by AOV name.
 
     The finished beauty is denoised diffuse plus denoised specular, which
     denoise_batch sums into R, G, B. The halves of a split LPE are summed the
     same way into the LPE's own layer.
-
-    If more than one frame, uses cross-frame denoise. Otherwise, uses
-    single-frame denoise.
     """
-
-    topology, parameters = CROSS_FRAME if frames > 1 else SINGLE_FRAME
+    topology, parameters = CROSS_FRAME if len(frames) > 1 else SINGLE_FRAME
 
     outputs: dict[str, list[dict]] = {
         "albedo": [],
         "alpha": [_output("A", "A")],
-        DIFFUSE: [_output("diffuse", "RGB")],
-        SPECULAR: [_output("specular", "RGB")],
+        "diffuse": [_output("diffuse", "RGB")],
+        "specular": [_output("specular", "RGB")],
         "copy": [],
     }
-    for var, lpe in vars:
+    for name, bounce in bounces.items():
         # The denoiser's own inputs, the alpha and the beauty are written above.
-        if var.endswith(("mse", "_var")) or var in ("a", "Ci", "sampleCount"):
+        if name.endswith(("mse", "_var")) or name in ("a", "Ci", "sampleCount"):
             continue
-        kind = lpe or var.partition("_")[0]
-        if lpe and var.endswith(HALVES[lpe]):
-            outputs[lpe].append(_output(var, var.removesuffix(HALVES[lpe])))
-        elif var.startswith(("backward", "forward")) or var in ("__depth", "zfiltered"):
-            outputs["alpha"].append(_output(var, var))
-        elif kind in ("albedo", DIFFUSE, SPECULAR):
-            outputs[kind].append(_output(var, var))
+        kind = bounce or name.partition("_")[0]
+        if bounce and name.endswith(HALVES[bounce]):
+            outputs[bounce].append(_output(name, name.removesuffix(HALVES[bounce])))
+        elif name.startswith(("backward", "forward")) or name in (
+            "__depth",
+            "zfiltered",
+        ):
+            outputs["alpha"].append(_output(name, name))
+        elif kind in ("albedo", "diffuse", "specular"):
+            outputs[kind].append(_output(name, name))
         else:
-            outputs["copy"].append(_output(var, var))
+            outputs["copy"].append(_output(name, name))
 
     passes = [
         _pass("albedo", "albedo", "albedo_mse", outputs["albedo"]),
         _pass("alpha", "A", "mse", outputs["alpha"]),
-        _pass(DIFFUSE, "diffuse", "diffuse_mse", outputs[DIFFUSE]),
-        _pass(SPECULAR, "specular", "specular_mse", outputs[SPECULAR]),
+        _pass("diffuse", "diffuse", "diffuse_mse", outputs["diffuse"]),
+        _pass("specular", "specular", "specular_mse", outputs["specular"]),
     ]
     if outputs["copy"]:
         # No layer is named Ci, so denoise_batch skips this pass's filter and
@@ -183,17 +174,13 @@ def write_config(folder: Path, config: dict) -> None:
     (folder / DENOISE_CONFIG).write_text(json.dumps(config))
 
 
-def var_names(product: Usd.Prim) -> list[str]:
-    return [paths.aov_name(var) for var in paths.render_vars(product)]
-
-
-def var_kinds(product: Usd.Prim) -> list[tuple[str, str | None]]:
-    """Each var's AOV name and LPE kind. Denoise's own vars go by their names:
+def bounces(product: Usd.Prim) -> dict[str, str | None]:
+    """Each var's first bounce by AOV name. Denoise's own vars go by their names:
     its albedo is an LPE through specular bounces, but isn't specular."""
-    found = []
+    found = {}
     for var in paths.render_vars(product):
         name = paths.aov_name(var)
-        found.append((name, None if name in PASSES else lpe_kind(var)))
+        found[name] = None if name in PASSES else _first_bounce(var)
     return found
 
 
@@ -209,7 +196,7 @@ def add_passes(stage: Usd.Stage, configured: Usd.Stage, settings: str) -> None:
     product = paths.beauty_product(rendered, paths.products(rendered))
     rel = UsdRender.Product(product).GetOrderedVarsRel()
     for var in paths.render_vars(product):
-        if split := halves(var):
+        if split := _halves(var):
             _split(rel, var, split)
     for prim in Usd.PrimRange(stage.GetPrimAtPath("/Render")):
         if prim.IsA(paths.VAR) and not configured.GetPrimAtPath(prim.GetPath()):
@@ -224,7 +211,7 @@ def add_passes(stage: Usd.Stage, configured: Usd.Stage, settings: str) -> None:
 def _split(rel: Usd.Relationship, var: Usd.Prim, split: tuple[str, str]) -> None:
     """Render `var` as its two halves in its place. Its layer is their sum."""
     name = paths.aov_name(var)
-    for (kind, suffix), expression in zip(HALVES.items(), split):
+    for suffix, expression in zip(HALVES.values(), split):
         path = var.GetPath().GetParentPath().AppendChild(var.GetName() + suffix)
         if var.GetStage().GetPrimAtPath(path):
             raise SendRefused(
@@ -238,11 +225,8 @@ def _split(rel: Usd.Relationship, var: Usd.Prim, split: tuple[str, str]) -> None
             copy.Set(attr.Get())
         half.GetAttribute(SOURCE_NAME).Set(expression)
         for attr in paths.AOV_NAMES:
-            if half.HasAttribute(attr):
-                half.GetAttribute(attr).Set(name + suffix)
-        half.CreateAttribute(paths.AOV_NAMES[0], Sdf.ValueTypeNames.String).Set(
-            name + suffix
-        )
+            if attr == paths.AOV_NAMES[0] or half.HasAttribute(attr):
+                half.CreateAttribute(attr, Sdf.ValueTypeNames.String).Set(name + suffix)
         rel.AddTarget(path)
     rel.RemoveTarget(var.GetPath())
 
@@ -250,7 +234,7 @@ def _split(rel: Usd.Relationship, var: Usd.Prim, split: tuple[str, str]) -> None
 def product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
     """The beauty product, which Denoise gave its passes."""
     found = paths.beauty_product(settings, products)
-    if not PASSES <= set(var_names(found)):
+    if not PASSES <= bounces(found).keys():
         raise SendRefused(
             f"{found.GetPath()} lacks the passes Denoise adds, so it can't be "
             "denoised. Check that Denoise follows Configure and isn't bypassed."

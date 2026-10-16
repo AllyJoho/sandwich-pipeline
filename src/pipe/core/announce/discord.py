@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import ssl
 import urllib.request
 
 TIMEOUT_SECONDS = 5.0
+SYSTEM_CA_BUNDLE = "/etc/pki/tls/certs/ca-bundle.crt"
 
 
 def post_message(webhook_url: str, text: str, role_ids: list[str]) -> None:
@@ -27,5 +30,7 @@ def post_message(webhook_url: str, text: str, role_ids: list[str]) -> None:
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS):
+    cafile = SYSTEM_CA_BUNDLE if os.path.isfile(SYSTEM_CA_BUNDLE) else None
+    context = ssl.create_default_context(cafile=cafile)
+    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS, context=context):
         pass

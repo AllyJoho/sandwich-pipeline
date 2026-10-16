@@ -140,6 +140,7 @@ def apply_render_settings(scene: Scene, view_layer: ViewLayer) -> None:
     scene.render.resolution_y = 1080
     scene.render.resolution_percentage = 100
     image = scene.render.image_settings
+    image.media_type = "IMAGE"
     image.file_format = "OPEN_EXR"
     image.color_mode = "RGBA"
     image.color_depth = "16"

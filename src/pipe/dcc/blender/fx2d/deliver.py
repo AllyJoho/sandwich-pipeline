@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import bpy
-from bpy.types import Collection, Context, Event, Operator, Scene
+from bpy.types import Collection, Context, Event, Operator, Scene, ViewLayer
 
 from env_sg import DB_Config
 from pipe.core import render
@@ -21,18 +21,20 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def _layers(scene: Scene) -> list[Collection]:
+def _layers(scene: Scene, view_layer: ViewLayer) -> list[Collection]:
     """Top-level collections to deliver: not pipeline-owned, not hidden, not empty."""
+    layer_collections = view_layer.layer_collection.children
     return [
         collection
         for collection in scene.collection.children
         if collection.name != util.CONTEXT
         and not collection.hide_render
+        and not layer_collections[collection.name].exclude
         and collection.all_objects
     ]
 
 
-def _uncut(scene: Scene) -> list[str]:
+def _uncut(scene: Scene, view_layer: ViewLayer) -> list[str]:
     """Grease Pencil objects the holdout cannot cut: In Front draws over everything."""
     context_collection = scene.collection.children.get(util.CONTEXT)
     holdout = context_collection and context_collection.children.get(util.HOLDOUT)
@@ -40,7 +42,7 @@ def _uncut(scene: Scene) -> list[str]:
         return []
     return [
         obj.name
-        for layer in _layers(scene)
+        for layer in _layers(scene, view_layer)
         for obj in layer.all_objects
         if obj.type == "GREASEPENCIL" and obj.show_in_front
     ]
@@ -67,12 +69,12 @@ class SKD_OT_fx2d_deliver(Operator):
         return util.poll_fx2d_file(cls)
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
-        assert context.scene is not None
+        assert context.scene is not None and context.view_layer is not None
         message = (
             "Render and deliver every effect layer? Blender is busy until it finishes."
         )
         # Asked before rendering: afterwards the uncut layer is already comp's newest.
-        uncut = _uncut(context.scene)
+        uncut = _uncut(context.scene, context.view_layer)
         if uncut:
             message += (
                 "\nThe holdout will not cut these Grease Pencil objects because they "
@@ -94,11 +96,12 @@ class SKD_OT_fx2d_deliver(Operator):
                 "layer collection.",
             )
             return {"CANCELLED"}
-        layers = _layers(scene)
+        layers = _layers(scene, view_layer)
         if not layers:
             self.report(
                 {"ERROR"},
-                "Could not deliver because no layer collection has anything in it.",
+                "Could not deliver because no layer collection is enabled for "
+                "rendering and has anything in it.",
             )
             return {"CANCELLED"}
 

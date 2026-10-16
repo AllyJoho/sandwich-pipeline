@@ -43,6 +43,21 @@ _MIXER_SLOTS = 4
 
 _MATERIAL_Y_STEP = 3.5
 _LAYER_Y_STEP = 8.0
+# One node's height in the network editor. Texture readers stack in one column
+# and each one's processing node sits level with it in the next.
+_NODE_ROW = 1.38
+_READER_X = -5.0
+_PROCESS_X = -2.0
+# The row spacing assumes these nodes show only their wired connectors; the
+# rest stay fully expanded.
+_CONNECTOR_DETAIL = {
+    "pxrtexture::3.0": hou.nodeFlag.InOutDetailLow,
+    "pxrnormalmap::3.0": hou.nodeFlag.InOutDetailLow,
+    "pxrremap::3.0": hou.nodeFlag.InOutDetailLow,
+    "pxrinvert::3.0": hou.nodeFlag.InOutDetailLow,
+    "usduvtexture::2.0": hou.nodeFlag.InOutDetailLow,
+    "pxrmetallicworkflow::3.0": hou.nodeFlag.InOutDetailMedium,
+}
 _UV_PRIMVAR = "st"
 # RenderMan colour-config aliases. Published `.tex` colour maps are already
 # ACEScg, so they are tagged "rendering" rather than converted on read.
@@ -64,29 +79,35 @@ class _PreviewInput:
     surface_input: str
     texture_output: str
     source_colorspace: str
-    row_offset: float
+    row: int
     scale: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     bias: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
 
 _PREVIEW_INPUTS = (
-    _PreviewInput("BaseColor", "diffuseColor", "rgb", "sRGB", 2.0),
-    _PreviewInput("Metallic", "metallic", "r", "raw", 0.0),
-    _PreviewInput("SpecularRoughness", "roughness", "r", "raw", -2.0),
+    _PreviewInput("BaseColor", "diffuseColor", "rgb", "sRGB", 0),
+    _PreviewInput("Metallic", "metallic", "r", "raw", 1),
+    _PreviewInput("SpecularRoughness", "roughness", "r", "raw", 2),
     # Normal maps store 0..1; UsdPreviewSurface wants -1..1 tangent space.
     _PreviewInput(
         "Normal",
         "normal",
         "rgb",
         "raw",
-        -4.0,
+        3,
         scale=(2.0, 2.0, 2.0, 1.0),
         bias=(-1.0, -1.0, -1.0, 0.0),
     ),
 )
 
+# Shaded in renders only. Houdini's VK viewport ignores a texture's bias, so
+# the preview can't remap the mask into a usable opacity.
+_RENDER_ONLY_MAPS = frozenset({"Transparency"})
 
-if {preview.map_name for preview in _PREVIEW_INPUTS} != set(textures.MAPS):
+
+if {preview.map_name for preview in _PREVIEW_INPUTS} != (
+    set(textures.MAPS) - _RENDER_ONLY_MAPS
+):
     # Drift here is silent: a discovered map with no entry is simply never wired.
     raise ImportError(
         "_PREVIEW_INPUTS and textures.MAPS disagree, so a published preview "
@@ -157,6 +178,7 @@ class MaterialGraphBuilder:
         )
         # The HDA's Material Library collects material-flagged children (matflag1).
         builder.setMaterialFlag(True)  # ty:ignore[unresolved-attribute]
+        builder.setUserData("wirestyle", "rounded")
         output = self._material_output(builder)
 
         surface = self._build_renderman_shader(builder, material)
@@ -228,13 +250,15 @@ class MaterialGraphBuilder:
         layer = self._create(builder, "pxrlayer::3.0", f"Layer_{suffix}", (1.0, y))
         _parm(layer, "enableSpecular").set(True)
         _parm(layer, "specularGain").set(1.0)
+        # RenderMan creates every input group collapsed; open the ones we wire.
+        layer.destroyUserData("__inputgroup_Primary Specular")
 
         base_color = self._texture(
             builder,
             "pxrtexture::3.0",
             f"BaseColor_{suffix}",
             maps.get("BaseColor"),
-            (-5.0, y + 3.0),
+            (_READER_X, y),
             colorspace=_COLOR_SPACE,
         )
         metallic = self._texture(
@@ -242,7 +266,7 @@ class MaterialGraphBuilder:
             "pxrtexture::3.0",
             f"Metallic_{suffix}",
             maps.get("Metallic"),
-            (-5.0, y + 0.5),
+            (_READER_X, y - _NODE_ROW),
             colorspace=_DATA_SPACE,
         )
         roughness = self._texture(
@@ -250,7 +274,7 @@ class MaterialGraphBuilder:
             "pxrtexture::3.0",
             f"Roughness_{suffix}",
             maps.get("SpecularRoughness"),
-            (-8.0, y - 2.0),
+            (_READER_X, y - 3 * _NODE_ROW),
             colorspace=_DATA_SPACE,
         )
         normal = self._texture(
@@ -258,7 +282,15 @@ class MaterialGraphBuilder:
             "pxrnormalmap::3.0",
             f"Normal_{suffix}",
             maps.get("Normal"),
-            (-2.0, y - 3.5),
+            (_PROCESS_X, y - 4 * _NODE_ROW),
+            colorspace=_DATA_SPACE,
+        )
+        transparency = self._texture(
+            builder,
+            "pxrtexture::3.0",
+            f"Transparency_{suffix}",
+            maps.get("Transparency"),
+            (_READER_X, y - 2 * _NODE_ROW),
             colorspace=_DATA_SPACE,
         )
 
@@ -270,7 +302,40 @@ class MaterialGraphBuilder:
             self._insert_roughness_remap(builder, layer, suffix, y, roughness)
         if normal is not None:
             layer.setNamedInput("bumpNormal", normal, "resultN")
+        if transparency is not None:
+            self._insert_glass(builder, layer, suffix, y, transparency)
         return layer
+
+    def _insert_glass(
+        self,
+        builder: hou.Node,
+        layer: hou.Node,
+        suffix: str,
+        y: float,
+        transparency: hou.Node,
+    ) -> hou.Node:
+        """Glass where the mask is white, and no diffuse there.
+
+        The mask drives both halves of the glass lobe: refraction alone loses
+        the Fresnel reflection that makes it read as glass. PxrSurface does not
+        trade diffuse against refraction, so clear areas would stay milky
+        without the inverted gain. `thinGlass` stays off because the show
+        models glass with thickness.
+        """
+        _parm(layer, "enableRR").set(True)
+        layer.destroyUserData("__inputgroup_Glass")
+        layer.setNamedInput("rrRefractionGain", transparency, "resultR")
+        layer.setNamedInput("rrReflectionGain", transparency, "resultR")
+        invert = self._create(
+            builder,
+            "pxrinvert::3.0",
+            f"DiffuseMask_{suffix}",
+            # Just under MetallicWorkflow, which shows more connectors.
+            (_PROCESS_X, y - 1.68),
+        )
+        invert.setNamedInput("inputRGB", transparency, "resultRGB")
+        layer.setNamedInput("diffuseGain", invert, "resultR")
+        return invert
 
     def _insert_metallic_workflow(
         self,
@@ -286,7 +351,7 @@ class MaterialGraphBuilder:
             builder,
             "pxrmetallicworkflow::3.0",
             f"MetallicWorkflow_{suffix}",
-            (-2.0, y + 1.0),
+            (_PROCESS_X, y),
         )
         if base_color is not None:
             workflow.setNamedInput("baseColor", base_color, "resultRGB")
@@ -314,7 +379,10 @@ class MaterialGraphBuilder:
         roughness: hou.Node,
     ) -> hou.Node:
         remap = self._create(
-            builder, "pxrremap::3.0", f"RoughnessRemap_{suffix}", (-5.0, y - 2.0)
+            builder,
+            "pxrremap::3.0",
+            f"RoughnessRemap_{suffix}",
+            (_PROCESS_X, y - 3 * _NODE_ROW),
         )
         remap.setNamedInput("inputRGB", roughness, "resultRGB")
         layer.setNamedInput("specularRoughness", remap, "resultR")
@@ -331,7 +399,10 @@ class MaterialGraphBuilder:
             builder, "usdpreviewsurface", f"{suffix}_UsdPreviewSurface", (11.0, row_y)
         )
         uv_reader = self._create(
-            builder, "usdprimvarreader", f"{suffix}_PreviewUv", (3.0, row_y)
+            builder,
+            "usdprimvarreader",
+            f"{suffix}_PreviewUv",
+            (5.0, row_y - 0.83),
         )
         _parm(uv_reader, "signature").set("float2")
         _parm(uv_reader, "varname").set(_UV_PRIMVAR)
@@ -344,7 +415,7 @@ class MaterialGraphBuilder:
                 builder,
                 "usduvtexture::2.0",
                 f"{preview.map_name}_{suffix}_PreviewTex",
-                (6.0, row_y + preview.row_offset),
+                (8.0, row_y + 1.23 - preview.row * _NODE_ROW),
             )
             _parm(texture, "file").set(path)
             _parm(texture, "sourceColorSpace").set(preview.source_colorspace)
@@ -401,6 +472,9 @@ class MaterialGraphBuilder:
         node.setName(name, unique_name=True)
         node.setUserData(_GENERATED_KEY, _GENERATED_VALUE)
         node.setPosition(hou.Vector2(*position))
+        detail = _CONNECTOR_DETAIL.get(node_type)
+        if detail is not None:
+            node.setGenericFlag(detail, True)
         return node
 
 

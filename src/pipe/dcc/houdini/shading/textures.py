@@ -7,8 +7,8 @@ A published material variant looks like::
     publish/tex/<geo>/<mat>/<layer>/_src/       Substance exports, render fallback
     publish/tex/<geo>/<mat>/<layer>/mat.json    the publish's own manifest
 
-Both surfaces consume the same four maps and the same `st` coordinates; only
-the file format differs.
+Both surfaces consume the same maps and the same `st` coordinates; only the
+file format differs.
 """
 
 from __future__ import annotations
@@ -33,7 +33,15 @@ log = logging.getLogger(__name__)
 MANIFEST_NAME = "mat.json"
 _BOUND_SCHEMAS = ("Mesh", "GeomSubset")
 
-MAPS: tuple[str, ...] = ("BaseColor", "Metallic", "SpecularRoughness", "Normal")
+# `Transparency` is a Painter user channel, not a stock one: white is clear
+# (refractive) material.
+MAPS: tuple[str, ...] = (
+    "BaseColor",
+    "Metallic",
+    "SpecularRoughness",
+    "Normal",
+    "Transparency",
+)
 
 # File formats each surface prefers, best first.
 _RENDER_EXTENSIONS = ("tex", "exr", "png")

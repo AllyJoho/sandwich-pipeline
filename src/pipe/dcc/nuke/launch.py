@@ -41,6 +41,12 @@ class NukeLauncher(Launcher):
                 str(get_production_path() / "ofx" / name) for name in OFX_PLUGINS
             ),
             **ocio_env_vars(),
+            # Configure Asset Resolver
+            "PXR_AR_DEFAULT_SEARCH_PATH": os.pathsep.join(
+                [
+                    str(get_production_path()),
+                ]
+            ),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_SCALE_FACTOR": os.getenv("NUKE_SCALE_FACTOR")

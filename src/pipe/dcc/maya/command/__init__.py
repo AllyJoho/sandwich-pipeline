@@ -82,7 +82,7 @@ def get_decorated_commands() -> set[CommandDescription]:
 
 
 @contextmanager
-def hotkey_set(name: str) -> Generator[None]:
+def hotkey_set(name: str) -> Generator[None, None, None]:
     """Context manager that creates a hotkeySet if it doesn't exist, sets it as current, and restores the previous set on exit."""
     prev_set: str = cmds.hotkeySet(query=True, current=True)  # type: ignore
     try:
@@ -96,7 +96,7 @@ def hotkey_set(name: str) -> Generator[None]:
 
 
 @contextmanager
-def undo_chunk(name: str) -> Generator[None]:
+def undo_chunk(name: str) -> Generator[None, None, None]:
     """Context manager that groups every scene edit in the block into one named undo entry, so a single Ctrl-Z reverts the whole operation."""
     cmds.undoInfo(openChunk=True, chunkName=name)
     try:

@@ -6,11 +6,13 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
+from pipe.core import telemetry
+from pipe.core.util.branding import ASCII_LOGO
+from pipe.core.util.paths import fix_launcher_metadata
+
 if TYPE_CHECKING:
     import typing
 
-from pipe.core import telemetry
-from pipe.core.util.paths import fix_launcher_metadata
 
 from .interface import DCCLauncher
 
@@ -139,7 +141,7 @@ class Launcher(DCCLauncher):
                 fix_launcher_metadata()
                 pre_launch_tasks()
                 venv = self._get_env_vars()
-
+                print(ASCII_LOGO)
                 log.info("Launching the software")
                 log.debug(f"Command: {command}, Args: {args}")
                 return_code = subprocess.call([command] + list(args or []), env=venv)

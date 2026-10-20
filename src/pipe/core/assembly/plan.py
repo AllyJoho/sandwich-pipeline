@@ -18,7 +18,7 @@ from pipe.core.asset.paths import (
 )
 from pipe.core.assembly.model import VARIANT_SEPARATOR, Piece, piece_prim_name
 from pipe.core.assembly.normalize import inspect_scale
-from pipe.core.assembly.pieces import assembly_of
+from pipe.core.assembly.pieces import assembly_of, split_from
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.shotgrid.paths import build_asset_path, normalize_display_name
 
@@ -178,7 +178,7 @@ def existing_model_problem(
 ) -> str | None:
     """Why a split cannot write `variants` into the child at `child_root`, or None."""
     hand_made = hand_made_model(child_root)
-    if hand_made is not None:
+    if hand_made is not None and not split_from(child_root):
         return (
             f"'{asset_name}' is modelled by hand ({hand_made}), so a split cannot "
             "add to it. Choose a different name."
@@ -215,7 +215,7 @@ def existing_model_problem(
 
 
 def hand_made_model(asset_root: Path) -> Path | None:
-    """The model file an artist made in Maya or Blender, which a split never joins."""
+    """The model file an artist made in Maya or Blender."""
     return next(
         (
             path

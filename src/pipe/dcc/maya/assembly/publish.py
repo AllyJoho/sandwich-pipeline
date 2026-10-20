@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pxr import Usd, UsdGeom
+from pxr import Sdf, Usd, UsdGeom, UsdShade
 
 from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import pieces_layer_for
@@ -15,6 +15,8 @@ from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import unsplit_nodes
 from pipe.dcc.maya.assembly.stage import find_assembly_stage
 from pipe.dcc.maya.util.usd_export import export_layer
+
+_MATERIAL_SCOPE = "mtl"
 
 
 def publishable_stage() -> Usd.Stage | None:
@@ -84,6 +86,30 @@ def _refuse_empty_pieces(stage: Usd.Stage) -> None:
 def export_assembly(stage: Usd.Stage, *, pieces: Path, mesh: Path) -> None:
     """Write the whole assembly, flat, for Painter, then the pieces layer for the builder."""
     flat = stage.Flatten()
+    share_materials(flat)
     pieces_layer = pieces_layer_for(stage)
     export_layer(flat, mesh)
     export_layer(pieces_layer, pieces)
+
+
+def share_materials(layer: Sdf.Layer) -> None:
+    """Merge same-named materials into one `<root>/mtl/<name>` each."""
+    stage = Usd.Stage.Open(layer)
+    scope = stage.GetDefaultPrim().GetPath().AppendChild(_MATERIAL_SCOPE)
+    UsdGeom.Scope.Define(stage, scope)
+    shared: dict[Sdf.Path, Sdf.Path] = {}
+    for material in [p for p in stage.Traverse() if UsdShade.Material(p)]:
+        old = material.GetPath()
+        new = scope.AppendChild(old.name)
+        if old != new and not layer.GetPrimAtPath(new):
+            Sdf.CopySpec(layer, old, layer, new)
+        shared[old] = new
+    for prim in stage.Traverse():
+        for binding in prim.GetRelationships():
+            if binding.GetName().startswith(UsdShade.Tokens.materialBinding):
+                binding.SetTargets([shared.get(t, t) for t in binding.GetTargets()])
+    for old, new in shared.items():
+        if old != new:
+            stage.RemovePrim(old)
+            if not stage.GetPrimAtPath(old.GetParentPath()).GetChildren():
+                stage.RemovePrim(old.GetParentPath())

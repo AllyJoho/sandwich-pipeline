@@ -17,7 +17,9 @@ from pipe.core.asset import (
 )
 from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT
 from pipe.core.assembly.model import AssemblyError
-from pxr import Usd
+from pipe.core.assembly.pieces import assembly_of, stamp_assembly
+from pipe.core.util.paths import get_production_path
+from pxr import Sdf, Usd
 from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.core.ui import (
     FilteredListDialog,
@@ -368,6 +370,7 @@ class AssetPublisher(Publisher):
         self._asset_name = None
         self._houdini_result = None
         self._assembly_stage: Usd.Stage | None = None
+        self._split_from: str | None = None
         self._asset_paths: AssetPaths | None = None
         self._scene_asset: Asset | None = None
         self._backup_result: BackupResult | None = None
@@ -792,6 +795,8 @@ class AssetPublisher(Publisher):
             if entity_list := self._get_entity_list():
                 if not self._select_asset_publish_target_or_cancel(entity_list):
                     return
+            if not self._confirm_split_variant():
+                return
 
             save_path = self._get_save_path()
             self._publish_path = save_path  # ty:ignore[invalid-assignment]
@@ -829,6 +834,35 @@ class AssetPublisher(Publisher):
             detail=detail,
         )
         return ["\n".join(lines)]
+
+    def _confirm_split_variant(self) -> bool:
+        """Warn before this file replaces a variant an assembly owns."""
+        self._split_from = None
+        asset = self._get_asset()
+        variant = self._get_variant_name()
+        if self._assembly_stage is not None or asset is None or not variant:
+            return True
+        source = paths_for_asset(asset).publish_source_variant_usd(variant)
+        self._split_from = assembly_of(source) if source.is_file() else None
+        if self._split_from is None:
+            return True
+        return bool(
+            MessageDialogCustomButtons(
+                self._window,
+                f"WARNING: '{variant}' is not this file's to publish.\n\n"
+                f"{asset.display_name} '{variant}' was split from the assembly "
+                f"{self._split_from}, and is modelled there with Edit Piece. "
+                "Publishing it from here replaces that model with this "
+                "file's, and the assembly shows this file's version wherever "
+                "this file puts it.\n\n"
+                "To make a variant of your own, Cancel and type a new name "
+                "in Geometry Variant.",
+                f"{asset.display_name} '{variant}' Belongs to an Assembly",
+                has_cancel_button=True,
+                ok_name="Replace It",
+                cancel_name="Cancel",
+            ).exec_()
+        )
 
     def _select_asset_publish_target_or_cancel(self, entity_list: list[str]) -> bool:
         """Run the asset-publisher dialog and populate `self._selected_item`/`self._entity`.
@@ -937,6 +971,8 @@ class AssetPublisher(Publisher):
                     exportCollectionBasedBindings=True,
                     **self._get_mayausd_kwargs(),
                 )
+                if self._split_from is not None:
+                    self._keep_split_stamp(self._split_from)
         except Exception as exc:
             log.exception("USD export failed")
             MessageDialog(
@@ -945,6 +981,15 @@ class AssetPublisher(Publisher):
                 "Export Failed",
             ).exec_()
             raise USDExportError(str(exc) or exc.__class__.__name__) from exc
+
+    def _keep_split_stamp(self, assembly: str) -> None:
+        """The assembly still places the replaced variant, so it stays the
+        assembly's: without the stamp the child would look hand-made."""
+        layer = Sdf.Layer.FindOrOpen(str(self._publish_path))
+        # A copy the registry held from before the export would be saved over it.
+        layer.Reload()
+        stamp_assembly(layer, get_production_path() / assembly)
+        layer.Save()
 
     def _run_postpublish_hook(self) -> None:
         """Invoke the subclass postpublish hook (e.g. the Houdini build)."""

@@ -137,14 +137,8 @@ def variant_list(variants: Iterable[str]) -> str:
 
 def placed_variants(child_root: Path) -> set[str]:
     """The variants the assemblies a child was split from place of it."""
-    sources = AssetPaths(child_root).publish_source_dir
-    assemblies = {
-        assembly
-        for source in sorted(sources.glob("*.usd"))
-        if (assembly := assembly_of(source)) is not None
-    }
     placed: set[str] = set()
-    for assembly in assemblies:
+    for assembly in split_from(child_root):
         pieces = AssetPaths(get_production_path() / assembly).pieces_layer
         for root, variants in child_variants(pieces).items():
             # By name: the hip and the pieces layer may reach /job by different mounts.
@@ -187,6 +181,24 @@ def assembly_of(source_layer: Path) -> str | None:
     if layer is None:
         return None
     return layer.customLayerData.get(ASSEMBLY_KEY)
+
+
+def split_from(child_root: Path) -> set[str]:
+    """The assemblies a child's variants were split from; none for a hand-made asset."""
+    return {
+        assembly
+        for source in AssetPaths(child_root).publish_source_dir.glob("*.usd")
+        if (assembly := assembly_of(source)) is not None
+    }
+
+
+def own_variants(child_root: Path) -> set[str]:
+    """A child's variants published from its own model file rather than split."""
+    return {
+        source.stem
+        for source in AssetPaths(child_root).publish_source_dir.glob("*.usd")
+        if assembly_of(source) is None
+    }
 
 
 def mark_published_assembly(entry_layer: Path) -> None:

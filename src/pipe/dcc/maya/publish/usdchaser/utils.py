@@ -134,6 +134,13 @@ def make_topo_attrs_default(stage: Usd.Stage) -> None:
                 attr.Set(data, Usd.TimeCode.Default())
 
 
+def remove_unused_opinions(stage: Usd.Stage):
+    root_prim = stage.GetPseudoRoot()
+    for prim in Usd.PrimRange(root_prim):
+        if prim.HasAuthoredMetadata("kind"):
+            prim.ClearMetadata("kind")
+
+
 def prefix_material_bindings(
     stage: Usd.Stage,
     collection_owner_path: Sdf.Path,

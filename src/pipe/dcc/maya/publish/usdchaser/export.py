@@ -26,6 +26,7 @@ from .utils import (
     make_topo_attrs_default,
     path_to_maya_dag_map,
     prefix_material_bindings,
+    remove_unused_opinions,
     scale_down_geo,
     split_by_namespace,
     split_preroll,
@@ -121,6 +122,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
         scale_down_geo(self._stage)
         make_topo_attrs_default(self._stage)
+        remove_unused_opinions(self._stage)
         layers = split_by_namespace(self._stage, _BODY_SUFFIX, path_dag_mapping)
         conn = ShotGrid.connect(DB_Config)
 

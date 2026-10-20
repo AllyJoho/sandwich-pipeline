@@ -348,6 +348,21 @@ def _set_parm_if_exists(node: hou.Node, parm_name: str, value) -> None:
     parm.set(value)
 
 
+def _config_settings(output: hou.Node) -> dict[str, Any]:
+    """What the artist set on the config above `output`; a regen rebuilds the node from scratch."""
+    config = output.input(0)
+    if config is None or CONFIG_NODE_TYPE not in config.type().name():
+        return {}
+    return {
+        parm.name(): parm.eval() for parm in config.parms() if not parm.isAtDefault()
+    }
+
+
+def _restore_config_settings(config: hou.Node, settings: dict[str, Any]) -> None:
+    for name, value in settings.items():
+        _set_parm_if_exists(config, name, value)
+
+
 def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
     node.setUserData(SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE)
     node.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
@@ -889,6 +904,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     warnings: list[str] = [*sg_warnings, *plan.warnings]
 
     owner_path = output.path()
+    config_settings = _config_settings(output)
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
     warnings.extend(
         _clear_managed_variant_nodes(
@@ -899,6 +915,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     config = parent.createNode(CONFIG_NODE_TYPE)
     config.setName("config", unique_name=True)
     _mark_managed_variant_node(config, owner_path=owner_path)
+    _restore_config_settings(config, config_settings)
 
     lookdev = create_skd_lookdev(parent, "lookdev")
     _mark_managed_variant_node(lookdev, owner_path=owner_path)
@@ -1065,6 +1082,7 @@ def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> list[str]:
     parent = output.parent()
     out_pos = output.position()
     owner_path = output.path()
+    config_settings = _config_settings(output)
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
     replaced = _clear_managed_variant_nodes(
         parent, keep_paths={owner_path}, owner_path=owner_path
@@ -1073,6 +1091,7 @@ def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> list[str]:
     sublayer = _create_pieces_sublayer(parent, pieces, owner_path=owner_path)
     config = parent.createNode(CONFIG_NODE_TYPE, "config")
     _mark_managed_variant_node(config, owner_path=owner_path)
+    _restore_config_settings(config, config_settings)
     lookdev = create_skd_lookdev(parent, "lookdev")
     _mark_managed_variant_node(lookdev, owner_path=owner_path)
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from pipe.core.color import ocio_env_vars
+from pipe.core.color import DISPLAY, PICKER_VIEW, ocio_env_vars
 from pipe.core.util.paths import get_shared_telemetry_spool_dir
 from env import Executables
 from pipe.framework.launcher import Launcher
@@ -36,6 +36,8 @@ class SubstancePainterLauncher(Launcher):
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_PLUGIN_PATH": "",
+            "SUBSTANCE_PAINTER_COLOR_PICKER_OCIO_DISPLAY": DISPLAY,
+            "SUBSTANCE_PAINTER_COLOR_PICKER_OCIO_VIEW": PICKER_VIEW,
             "SUBSTANCE_PAINTER_PLUGINS_PATH": str(this_path.parent / "site"),
         }
 

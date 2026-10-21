@@ -6,8 +6,8 @@
          "Info":{
              "Kinds":{
                 "rig":{
-                   "baseKind":"component",
-                   "description":"A component that is meant to inherit animation data."
+                   "baseKind":"group",
+                   "description":"A rig that is meant to inherit animation data."
                 },
                 "character":{
                    "baseKind":"rig",

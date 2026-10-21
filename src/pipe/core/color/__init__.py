@@ -10,6 +10,7 @@ CONFIG_VERSION = "sandwich-v02"
 
 DISPLAY = "sRGB - Display"
 DEFAULT_VIEW = "OpenDRT - Standard"
+PICKER_VIEW = "Un-tone-mapped"
 ACTIVE_VIEWS = (
     "OpenDRT - Standard, OpenDRT - Standard B&W, "
     "ACES 2.0 - SDR 100 nits (Rec.709), ACES 2.0 - SDR B&W (Rec.709), "
@@ -45,6 +46,7 @@ __all__ = [
     "CONFIG_VERSION",
     "DEFAULT_VIEW",
     "DISPLAY",
+    "PICKER_VIEW",
     "config_dir",
     "config_path",
     "ocio_env_vars",

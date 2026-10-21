@@ -117,6 +117,7 @@ class MayaLauncher(Launcher):
                 third_party / "y-rig/shifter/components/"
             ),
             "MGEAR_SHIFTER_CUSTOMSTEP_PATH": str(rig_build_path),
+            "NXT_SITE_DIR": str(site_path / "nxt"),
         }
 
         launch_command = ""

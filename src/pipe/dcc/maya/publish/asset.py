@@ -15,6 +15,7 @@ from pipe.core.asset import (
     maya_model_stream,
     paths_for_asset,
 )
+from pipe.core.asset.painter_mesh import read_painter_offset, shape_for_painter
 from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT
 from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import assembly_of, stamp_assembly
@@ -50,7 +51,7 @@ from pipe.dcc.maya.assetfile import scene_asset, write_asset_metadata
 from pipe.dcc.maya.util.materials import material_problems
 from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
-from pipe.dcc.maya.util.usd_export import export_selection
+from pipe.dcc.maya.util.usd_export import export_layer, export_selection
 
 from .publisher import PublishCopyError, Publisher, USDExportError
 
@@ -956,13 +957,17 @@ class AssetPublisher(Publisher):
         return steps
 
     def _export_usd_to_publish_path(self) -> None:
-        """Write the source layer: the selection, or an assembly's pieces and flat mesh."""
+        """Write the source layer and its Painter copy: the selection, or an
+        assembly's pieces and flat mesh."""
         try:
+            paths = cast(AssetPaths, self._asset_paths)
+            painter = paths.painter_mesh(self._geo_variant)
             if self._assembly_stage is not None:
                 export_assembly(
                     self._assembly_stage,
-                    pieces=cast(AssetPaths, self._asset_paths).pieces_layer,
+                    pieces=paths.pieces_layer,
                     mesh=self._publish_path,
+                    painter=painter,
                 )
             else:
                 export_selection(
@@ -973,6 +978,7 @@ class AssetPublisher(Publisher):
                 )
                 if self._split_from is not None:
                     self._keep_split_stamp(self._split_from)
+                self._write_painter_mesh(painter)
         except Exception as exc:
             log.exception("USD export failed")
             MessageDialog(
@@ -981,6 +987,16 @@ class AssetPublisher(Publisher):
                 "Export Failed",
             ).exec_()
             raise USDExportError(str(exc) or exc.__class__.__name__) from exc
+
+    def _write_painter_mesh(self, painter: Path) -> None:
+        """Painter reads its own copy of the source layer (`pipe.core.asset.painter_mesh`)."""
+        layer = Sdf.Layer.FindOrOpen(str(self._publish_path))
+        # The registry may still hold the layer from before the export.
+        layer.Reload()
+        export_layer(
+            shape_for_painter(layer, offset=read_painter_offset(painter.parent)),
+            painter,
+        )
 
     def _keep_split_stamp(self, assembly: str) -> None:
         """The assembly still places the replaced variant, so it stays the

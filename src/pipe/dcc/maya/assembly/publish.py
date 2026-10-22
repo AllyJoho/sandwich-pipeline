@@ -1,6 +1,6 @@
 """
-What an assembly publishes from Maya. This includes an assembled USD
-reference chain, and a flat mesh for Painter.
+What an assembly publishes from Maya: the pieces layer the builder composes, the
+flat model as modelled, and the Painter copy of that model.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from pxr import Sdf, Usd, UsdGeom, UsdShade
 
 from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import pieces_layer_for
+from pipe.core.asset.painter_mesh import read_painter_offset, shape_for_painter
 from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import unsplit_nodes
 from pipe.dcc.maya.assembly.stage import find_assembly_stage
@@ -83,12 +84,17 @@ def _refuse_empty_pieces(stage: Usd.Stage) -> None:
         )
 
 
-def export_assembly(stage: Usd.Stage, *, pieces: Path, mesh: Path) -> None:
-    """Write the whole assembly, flat, for Painter, then the pieces layer for the builder."""
+def export_assembly(
+    stage: Usd.Stage, *, pieces: Path, mesh: Path, painter: Path
+) -> None:
+    """Write the whole assembly flat to `mesh`, its Painter copy, then the pieces layer."""
     flat = stage.Flatten()
     share_materials(flat)
     pieces_layer = pieces_layer_for(stage)
     export_layer(flat, mesh)
+    export_layer(
+        shape_for_painter(flat, offset=read_painter_offset(painter.parent)), painter
+    )
     export_layer(pieces_layer, pieces)
 
 

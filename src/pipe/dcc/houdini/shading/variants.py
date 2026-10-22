@@ -78,6 +78,10 @@ def texture_source_dir(hip_root: Path, geo_variant: str) -> Path:
     return get_production_path() / assembly / TEX_SOURCE_DIR / DEFAULT_GEOMETRY_VARIANT
 
 
+def published_material_variants(hip_root: Path, geo_variant: str) -> tuple[str, ...]:
+    return _discover_material_variants(texture_source_dir(hip_root, geo_variant))
+
+
 def portable_expression(path: Path, *, hip_root: Path) -> str:
     """`$HIP/...` for a path under the hip, `$JOB/...` for one elsewhere in production.
 
@@ -181,7 +185,7 @@ def _discover_build_plan(
     mats_by_geo: dict[str, tuple[str, ...]] = {}
     all_published_mats: set[str] = set()
     for geo_name in geo_names:
-        mat_variants = _discover_material_variants(texture_source_dir(root, geo_name))
+        mat_variants = published_material_variants(root, geo_name)
         mats_by_geo[geo_name] = mat_variants
         all_published_mats.update(mat_variants)
 
@@ -356,5 +360,6 @@ __all__ = [
     "material_scope_path",
     "node_token",
     "portable_expression",
+    "published_material_variants",
     "texture_source_dir",
 ]

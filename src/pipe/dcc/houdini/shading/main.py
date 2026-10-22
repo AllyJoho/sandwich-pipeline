@@ -5,6 +5,7 @@ The flow is one straight line:
     published texture files   (textures.published_materials)
     -> MaterialSpec per texture set
     -> MaterialGraphBuilder creates only the nodes each spec needs
+       (and `update` keeps whatever an artist edited; see update.py)
     -> the HDA's `errors` LOP checks every texture path still relocates
 
 `matlib_*` and `MatlibErrorChecker` are the SKD_MatLib HDA's entry points; see
@@ -14,7 +15,6 @@ the note on `MatlibErrorChecker` before renaming any of them.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -25,7 +25,9 @@ from env_sg import DB_Config
 
 from pipe.core.shotgrid import Asset, ShotGrid
 
-from . import textures, variants
+from . import textures, update, variants
+from .update import MaterialPlan
+from .update import node_name as _node_name
 
 log = logging.getLogger(__name__)
 
@@ -63,8 +65,6 @@ _UV_PRIMVAR = "st"
 # ACEScg, so they are tagged "rendering" rather than converted on read.
 _COLOR_SPACE = "rendering"
 _DATA_SPACE = "data"
-
-_NODE_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
 @dataclass(frozen=True)
@@ -138,43 +138,84 @@ def _parm_tuple(node: hou.Node, name: str) -> hou.ParmTuple:
     return parm_tuple
 
 
-def _node_name(value: str) -> str:
-    """Node-safe form of a texture-set or layer name, preserving case."""
-    cleaned = re.sub(r"_+", "_", _NODE_UNSAFE_RE.sub("_", value.strip())).strip("_")
-    if not cleaned:
-        return "material"
-    return f"m_{cleaned}" if cleaned[0].isdigit() else cleaned
-
-
 class MaterialGraphBuilder:
     """Creates the generated material graphs inside a `materiallibrary` LOP.
 
-    Every node it creates is tagged, and every rebuild destroys the previous
-    generation first. Materials an artist authored by hand are left alone.
+    Every node it creates is tagged. Materials an artist authored by hand are
+    left alone, and so are generated ones an artist has since edited.
     """
 
     def __init__(self, matlib: hou.Node) -> None:
         self._matlib = matlib
 
-    def rebuild(
-        self, materials: Sequence[textures.MaterialSpec], *, build_preview: bool
-    ) -> None:
-        for child in self._matlib.children():
-            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE:
-                child.destroy()
-        for index, material in enumerate(materials):
+    def update(
+        self,
+        materials: Sequence[textures.MaterialSpec],
+        *,
+        build_preview: bool,
+        own_roots: Sequence[Path],
+        read_roots: Sequence[Path],
+    ) -> MaterialPlan:
+        plan = self.plan(
+            materials,
+            build_preview=build_preview,
+            own_roots=own_roots,
+            read_roots=read_roots,
+        )
+        for parm, path in plan.retarget:
+            parm.set(path)
+        for builder in plan.remove:
+            builder.destroy()
+        for builder, material in plan.rebuild:
+            position = builder.position()
+            builder.destroy()
+            self._build_material(material, position, build_preview=build_preview)
+        for material in plan.build:
             self._build_material(
-                material, y=-index * _MATERIAL_Y_STEP, build_preview=build_preview
+                material, (0.0, self._next_free_y()), build_preview=build_preview
             )
+        return plan
+
+    def plan(
+        self,
+        materials: Sequence[textures.MaterialSpec],
+        *,
+        build_preview: bool,
+        own_roots: Sequence[Path],
+        read_roots: Sequence[Path],
+    ) -> MaterialPlan:
+        builders = {
+            child.name(): child
+            for child in self._matlib.children()
+            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE
+        }
+        return update.plan(
+            self._matlib,
+            builders,
+            materials,
+            build_preview=build_preview,
+            own_roots=own_roots,
+            read_roots=read_roots,
+        )
+
+    def _next_free_y(self) -> float:
+        lowest = min(
+            (child.position().y() for child in self._matlib.children()), default=None
+        )
+        return 0.0 if lowest is None else lowest - _MATERIAL_Y_STEP
 
     def _build_material(
-        self, material: textures.MaterialSpec, *, y: float, build_preview: bool
+        self,
+        material: textures.MaterialSpec,
+        position: hou.Vector2 | tuple[float, float],
+        *,
+        build_preview: bool,
     ) -> None:
         builder = self._create(
             self._matlib,
             "pxrmaterialbuilder",
-            f"MAT_{_node_name(material.texture_set)}",
-            (0.0, y),
+            update.material_node_name(material.texture_set),
+            (position[0], position[1]),
         )
         # The HDA's Material Library collects material-flagged children (matflag1).
         builder.setMaterialFlag(True)  # ty:ignore[unresolved-attribute]
@@ -194,6 +235,7 @@ class MaterialGraphBuilder:
         output.setInput(0, surface, 0)
         if preview_surface is not None:
             output.setInput(1, preview_surface, 0)
+        update.stamp(builder, material, build_preview=build_preview)
 
     def _build_renderman_shader(
         self, builder: hou.Node, material: textures.MaterialSpec
@@ -583,14 +625,7 @@ def _asset_roots() -> list[Path]:
 
 
 def _file_reference_parms(node: hou.Node) -> list[hou.Parm]:
-    """Every parm Houdini types as a file reference."""
-    return [
-        parm
-        for parm in node.parms()
-        if isinstance(template := parm.parmTemplate(), hou.StringParmTemplate)
-        and template.stringType() == hou.stringParmType.FileReference
-        and not parm.isAtDefault()
-    ]
+    return [parm for parm in update.file_parms(node) if not parm.isAtDefault()]
 
 
 class MatlibErrorChecker:
@@ -619,71 +654,118 @@ class MatlibManager:
         _set_string_parm(self._node, "geo_var", self.geo_variants()[0])
         _set_string_parm(self._node, "mat_var", self.mat_variants()[0])
 
-    def rebuild(self) -> None:
+    def rebuild(self) -> list[str]:
+        """Bring the materials up to date; what it could not do, for the artist."""
         matlib = self._material_library()
         if matlib is None:
-            log.error(
-                "No %s node inside %s, so there is nothing to rebuild.",
-                _MATLIB_TYPE,
-                self._node.path(),
-            )
-            return
+            return [self._no_matlib()]
 
-        geo_variant, mat_variant = self._variants()
+        geo_variant, mat_variant = self.variants()
         # Component Material expects /ASSET/mtl/g_<geo>/v_<mat>/MAT_<texset>.
         _parm(matlib, "matpathprefix").set(
             variants.material_scope_path(mat_variant, geo_variant=geo_variant)
         )
-        MaterialGraphBuilder(matlib).rebuild(
+        plan = MaterialGraphBuilder(matlib).update(
             self._materials(geo_variant, mat_variant),
-            build_preview=_toggle(self._node, "build_usd_preview", default=True),
+            build_preview=self._build_preview(),
+            **self._roots(geo_variant, mat_variant),
         )
+        return [*plan.kept, *self._missing(plan)]
 
     def problems(self) -> list[str]:
-        """Why the generated materials no longer match the published textures."""
+        """Why the materials no longer match the published textures."""
         matlib = self._material_library()
         if matlib is None:
-            return [
-                f"'{self._node.name()}' has no {_MATLIB_TYPE} node, so it builds nothing."
-            ]
-        geo_variant, mat_variant = self._variants()
-        wanted = {
-            f"MAT_{_node_name(material.texture_set)}": material.texture_set
-            for material in self._materials(geo_variant, mat_variant)
-        }
-        built = {
-            child.name()
-            for child in matlib.children()
-            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE
-        }
-        unbuilt = sorted(
-            set_name for name, set_name in wanted.items() if name not in built
+            return [self._no_matlib()]
+        geo_variant, mat_variant = self.variants()
+        plan = MaterialGraphBuilder(matlib).plan(
+            self._materials(geo_variant, mat_variant),
+            build_preview=self._build_preview(),
+            **self._roots(geo_variant, mat_variant),
         )
-        stale = sorted(built - wanted.keys())
         name = self._node.name()
         where = f"geo='{geo_variant}' mat='{mat_variant}'"
+        unbuilt = ", ".join(material.texture_set for material in plan.build)
+        changed = ", ".join(builder.name() for builder, _ in plan.rebuild)
+        stale = ", ".join(builder.name() for builder in plan.remove)
         problems: list[str] = []
         if unbuilt and self._node.isGenericFlagSet(hou.nodeFlag.Bypass):
             problems.append(
                 f"'{name}' is bypassed, so it publishes no materials, but {where} now "
-                f"has textures for {', '.join(unbuilt)}. Un-bypass it and its Component "
+                f"has textures for {unbuilt}. Un-bypass it and its Component "
                 "Material, press Rebuild Materials on it, then publish again."
             )
         elif unbuilt:
             problems.append(
-                f"'{name}' has no material for {', '.join(unbuilt)}, which the geometry "
+                f"'{name}' has no material for {unbuilt}, which the geometry "
                 f"binds and {where} has textures for. Press Rebuild Materials on it, "
                 "then publish again."
             )
+        if changed:
+            problems.append(
+                f"'{name}' builds {changed} from textures that have changed since. "
+                "Press Rebuild Materials on it, then publish again."
+            )
         if stale:
             problems.append(
-                f"'{name}' still builds {', '.join(stale)}, whose textures are no longer "
+                f"'{name}' still builds {stale}, whose textures are no longer "
                 f"published for {where} or which the geometry no longer binds. Press "
                 "Rebuild Materials on it to drop them, then publish again."
             )
-        return problems
+        if plan.retarget:
+            problems.append(
+                f"'{name}' has {len(plan.retarget)} texture path(s) that no longer "
+                "point at the published textures. Press Rebuild Materials on it to "
+                "repoint them, then publish again."
+            )
+        return [*problems, *plan.kept, *self._missing(plan)]
 
-    def _variants(self) -> tuple[str, str]:
+    def has_textures(self) -> bool:
+        geo_variant, mat_variant = self.variants()
+        hip_root = Path(hou.hscriptStringExpression("$HIP"))
+        return mat_variant in variants.published_material_variants(
+            hip_root, geo_variant
+        )
+
+    def has_hand_edits(self) -> bool:
+        matlib = self._material_library()
+        return matlib is not None and any(
+            not update.is_untouched(child)
+            for child in matlib.children()
+            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE
+        )
+
+    def _missing(self, plan: MaterialPlan) -> list[str]:
+        if not plan.missing:
+            return []
+        shown = "\n    ".join(plan.missing[:_MAX_REPORTED])
+        more = len(plan.missing) - _MAX_REPORTED
+        return [
+            f"'{self._node.name()}' reads {len(plan.missing)} texture(s) that are not "
+            f"on disk:\n    {shown}"
+            + (f"\n    ...and {more} more." if more > 0 else "")
+            + "\nRepublish the textures from Substance Painter, or ask a TD."
+        ]
+
+    def _no_matlib(self) -> str:
+        return (
+            f"'{self._node.name()}' has no {_MATLIB_TYPE} node, so it builds nothing."
+        )
+
+    def _build_preview(self) -> bool:
+        return _toggle(self._node, "build_usd_preview", default=True)
+
+    def _roots(self, geo_variant: str, mat_variant: str) -> dict[str, list[Path]]:
+        """Where this variant's textures live, and where any of the asset's do."""
+        hip_root = Path(hou.hscriptStringExpression("$HIP"))
+        source = variants.texture_source_dir(hip_root, geo_variant)
+        own = hip_root / variants.TEX_SOURCE_DIR
+        return {
+            "own_roots": [source / mat_variant, own / geo_variant / mat_variant],
+            "read_roots": [source, own],
+        }
+
+    def variants(self) -> tuple[str, str]:
         return (
             _string_parm(self._node, "geo_var", "main"),
             _string_parm(self._node, "mat_var", _NO_TEXTURES),
@@ -785,12 +867,40 @@ def matlib_mat_variant_menu(node: hou.LopNode) -> list[str]:
 
 def matlib_on_variant_changed(node: hou.LopNode) -> None:
     if _toggle(node, "auto_rebuild", default=False):
-        MatlibManager(node).rebuild()
+        matlib_rebuild(node)
 
 
 def matlib_rebuild(node: hou.LopNode) -> None:
-    MatlibManager(node).rebuild()
+    """The Rebuild Materials button: says what it had to leave alone."""
+    notes = matlib_update(node)
+    if not notes:
+        return
+    message = "\n\n".join(notes)
+    if hou.isUIAvailable():
+        hou.ui.displayMessage(
+            message, severity=hou.severityType.Warning, title="Rebuild Materials"
+        )
+    else:
+        log.warning("%s: %s", node.path(), message)
+
+
+def matlib_update(node: hou.LopNode) -> list[str]:
+    return MatlibManager(node).rebuild()
 
 
 def matlib_problems(node: hou.LopNode) -> list[str]:
     return MatlibManager(node).problems()
+
+
+def matlib_has_textures(node: hou.LopNode) -> bool:
+    return MatlibManager(node).has_textures()
+
+
+def matlib_has_hand_edits(node: hou.LopNode) -> bool:
+    """Whether any generated material inside was changed since it was built."""
+    return MatlibManager(node).has_hand_edits()
+
+
+def matlib_variants(node: hou.LopNode) -> tuple[str, str]:
+    """The (geometry, material) variant a MatLib builds."""
+    return MatlibManager(node).variants()

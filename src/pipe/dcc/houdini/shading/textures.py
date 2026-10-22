@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pxr import Usd, UsdShade
 
@@ -71,6 +72,19 @@ _TEX_FILE_RE = re.compile(
     rf"(?:\.(?P<udim>\d{{4}}))?\.(?P<ext>[A-Za-z0-9]+)$"
 )
 _UDIM_RE = re.compile(r"\.(?P<udim>\d{4})(?=\.[^.]+$)")
+_UDIM_TOKEN = "<UDIM>"
+
+
+@dataclass(frozen=True)
+class TextureKey:
+    """Which published map a texture path reads, whatever folder holds it.
+
+    Previews are merged across layers into one surface, so theirs is None.
+    """
+
+    tex_set: str
+    layer: str | None
+    map_name: str
 
 
 @dataclass(frozen=True)
@@ -131,6 +145,32 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
 
         materials.append(MaterialSpec(tex_set, layer_specs, preview_maps))
     return tuple(materials)
+
+
+def texture_key(path: str) -> TextureKey | None:
+    """The map a `<layer>/[_preview/|_src/]<file>` path reads, or None for another file."""
+    file = PurePosixPath(path.replace(_UDIM_TOKEN, "1001"))
+    texture = _parse_texture_file(Path(file.name), priority=0)
+    if texture is None:
+        return None
+    folder = file.parent
+    if folder.name == PUBLISH_TEXTURES_PREVIEW_DIRNAME:
+        return TextureKey(texture.tex_set, None, texture.map_name)
+    if folder.name == PUBLISH_TEXTURES_SOURCE_DIRNAME:
+        folder = folder.parent
+    return TextureKey(texture.tex_set, folder.name, texture.map_name)
+
+
+def wanted_paths(materials: Sequence[MaterialSpec]) -> dict[TextureKey, str]:
+    """Every path the materials read, by the map it is."""
+    wanted: dict[TextureKey, str] = {}
+    for material in materials:
+        for layer in material.layers:
+            for map_name, path in layer.render_maps.items():
+                wanted[TextureKey(material.texture_set, layer.name, map_name)] = path
+        for map_name, path in material.preview_maps.items():
+            wanted[TextureKey(material.texture_set, None, map_name)] = path
+    return wanted
 
 
 def bound_texture_sets(source_layer: Path) -> frozenset[str]:
@@ -261,6 +301,9 @@ __all__ = [
     "MAPS",
     "LayerSpec",
     "MaterialSpec",
+    "TextureKey",
     "bound_texture_sets",
     "published_materials",
+    "texture_key",
+    "wanted_paths",
 ]

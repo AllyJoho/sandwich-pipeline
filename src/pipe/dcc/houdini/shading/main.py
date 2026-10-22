@@ -100,13 +100,8 @@ _PREVIEW_INPUTS = (
     ),
 )
 
-# Shaded in renders only. Houdini's VK viewport ignores a texture's bias, so
-# the preview can't remap the mask into a usable opacity.
-_RENDER_ONLY_MAPS = frozenset({"Transparency"})
-
-
 if {preview.map_name for preview in _PREVIEW_INPUTS} != (
-    set(textures.MAPS) - _RENDER_ONLY_MAPS
+    set(textures.MAPS) - textures.RENDER_ONLY_MAPS
 ):
     # Drift here is silent: a discovered map with no entry is simply never wired.
     raise ImportError(

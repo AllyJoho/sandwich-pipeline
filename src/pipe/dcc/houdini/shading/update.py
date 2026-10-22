@@ -174,7 +174,10 @@ def _unwired(
         key
         for key in wanted
         if key.tex_set == material.texture_set
-        and (build_preview or key.layer is not None)
+        and (
+            key.layer is not None
+            or (build_preview and key.map_name not in textures.RENDER_ONLY_MAPS)
+        )
     }
     wired = {
         key

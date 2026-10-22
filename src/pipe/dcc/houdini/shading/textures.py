@@ -44,6 +44,10 @@ MAPS: tuple[str, ...] = (
     "Transparency",
 )
 
+# Shaded in renders only. Houdini's VK viewport ignores a texture's bias, so
+# the preview can't remap the mask into a usable opacity.
+RENDER_ONLY_MAPS = frozenset({"Transparency"})
+
 # File formats each surface prefers, best first.
 _RENDER_EXTENSIONS = ("tex", "exr", "png")
 _PREVIEW_EXTENSIONS = ("jpeg", "jpg")
@@ -299,6 +303,7 @@ def _subdirectories(root: Path) -> list[Path]:
 
 __all__ = [
     "MAPS",
+    "RENDER_ONLY_MAPS",
     "LayerSpec",
     "MaterialSpec",
     "TextureKey",

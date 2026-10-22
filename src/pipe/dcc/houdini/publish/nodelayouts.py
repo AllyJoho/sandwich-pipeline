@@ -206,7 +206,7 @@ def _create_pieces_sublayer(
     _set_parm_if_exists(
         sublayer,
         "filepath1",
-        variants.to_hip_expression(pieces, hip_root=hip_asset_root()),
+        variants.portable_expression(pieces, hip_root=hip_asset_root()),
     )
     _mark_managed_variant_node(sublayer, owner_path=owner_path)
     return sublayer
@@ -944,7 +944,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             parent=parent,
             node_name=geo_name,
             geo_variant=geo_plan.name,
-            source_expression=variants.to_hip_expression(
+            source_expression=variants.portable_expression(
                 geo_plan.source_path,
                 hip_root=plan.hip_root,
             ),
@@ -956,7 +956,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             pending=not geo_plan.source_exists,
             reason=(
                 f"Missing geometry publish: "
-                f"{variants.to_hip_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
+                f"{variants.portable_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
             ),
         )
 

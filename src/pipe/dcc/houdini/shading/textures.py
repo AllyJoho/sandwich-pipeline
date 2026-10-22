@@ -26,7 +26,7 @@ from pipe.core.asset.paths import (
 )
 from pipe.core.struct.material import MaterialInfo
 
-from .variants import to_hip_expression
+from .variants import portable_expression
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ _PREVIEW_EXTENSIONS = ("jpeg", "jpg")
 
 @dataclass(frozen=True)
 class LayerSpec:
-    """One layer of a material: map name to `$HIP`-relative texture path."""
+    """One layer of a material: map name to `$HIP`- or `$JOB`-relative texture path."""
 
     name: str
     render_maps: dict[str, str]
@@ -214,7 +214,7 @@ def _chosen_paths(
     extensions: tuple[str, ...],
     hip_root: Path,
 ) -> dict[str, str]:
-    """Best file per map for one texture set, as `$HIP` expressions."""
+    """Best file per map for one texture set, as portable expressions."""
     best: dict[str, _TextureFile] = {}
     for texture in files:
         if texture.tex_set != tex_set:
@@ -236,7 +236,7 @@ def _rank(texture: _TextureFile, extensions: tuple[str, ...]) -> tuple[int, int,
 
 
 def _texture_expression(texture: _TextureFile, hip_root: Path) -> str:
-    expression = to_hip_expression(texture.path, hip_root=hip_root)
+    expression = portable_expression(texture.path, hip_root=hip_root)
     return _UDIM_RE.sub(".<UDIM>", expression) if texture.udim else expression
 
 

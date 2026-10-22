@@ -694,7 +694,7 @@ class MatlibManager:
     ) -> Sequence[textures.MaterialSpec]:
         """The materials this MatLib builds: published textures the geometry binds."""
         hip_root = Path(hou.hscriptStringExpression("$HIP"))
-        tex_root = hip_root / variants.TEX_SOURCE_DIR / geo_variant / mat_variant
+        tex_root = variants.texture_source_dir(hip_root, geo_variant) / mat_variant
         materials = textures.published_materials(tex_root, hip_root=hip_root)
         if not materials:
             log.warning("No materials to build from %s", tex_root)

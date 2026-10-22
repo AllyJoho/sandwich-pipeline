@@ -47,6 +47,7 @@ from Qt.QtWidgets import (
 
 from pipe.dcc.houdini.launch import HoudiniLauncher
 from pipe.dcc.maya.assembly.publish import export_assembly, publishable_stage
+from pipe.dcc.maya.assembly.stage import STAGE_SHAPE_NAME
 from pipe.dcc.maya.assetfile import scene_asset, write_asset_metadata
 from pipe.dcc.maya.util.materials import material_problems
 from pipe.dcc.maya.util.random_color import is_random_color_active
@@ -630,6 +631,20 @@ class AssetPublisher(Publisher):
                 self._window,
                 "Error: Could not resolve the location for this asset in ShotGrid. Nothing exported",
                 "Error",
+            ).exec_()
+            return None
+
+        if (
+            self._assembly_stage is None
+            and paths_for_asset(asset).pieces_layer.is_file()
+        ):
+            MessageDialog(
+                self._window,
+                f"{asset.display_name} is an assembly, but this scene has no USD stage "
+                f"named '{STAGE_SHAPE_NAME}', so it would publish as a plain model. "
+                f"If the assembly's stage was renamed, rename it back to "
+                f"'{STAGE_SHAPE_NAME}', then publish again.",
+                "Cannot publish",
             ).exec_()
             return None
 

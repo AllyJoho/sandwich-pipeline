@@ -23,7 +23,6 @@ from pipe.core.assembly.normalize import (
 )
 from pipe.core.assembly.pieces import stamp_assembly
 from pipe.core.assembly.plan import existing_model_problem, scale_problem
-from pipe.core.assembly.textures import link_used_textures, texture_link_problem
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
     scene_units_problem,
@@ -58,10 +57,7 @@ def split_piece(piece: Piece, target: PieceTarget, *, assembly_root: Path) -> No
     scale = _bakeable_scale(piece)
     bounds_before = _piece_bounds(piece)
 
-    _refuse_own_textures(target)
     normalization = _install_source_layer(piece, target, scale, assembly_root)
-    # After the source layer: the links follow the tiles its UVs use.
-    link_used_textures(target.asset_root, target.variant, assembly_root)
     placement = placement_for(piece.world_matrix, normalization)
 
     stage = ensure_assembly_stage()
@@ -109,12 +105,6 @@ def _piece_bounds(piece: Piece) -> Gf.Range3d:
             "an empty asset. Split a group that contains the piece's meshes."
         )
     return world_point_bounds(piece.node)
-
-
-def _refuse_own_textures(target: PieceTarget) -> None:
-    problem = texture_link_problem(target.asset_root, target.variant)
-    if problem is not None:
-        raise AssemblyError(problem)
 
 
 def _install_source_layer(

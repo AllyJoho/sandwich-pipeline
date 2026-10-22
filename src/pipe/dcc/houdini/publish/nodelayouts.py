@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
@@ -38,6 +39,9 @@ SKD_VARIANT_GRAPH_NAME_KEY = "pipe_skd_variant_graph_name"
 SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
+# Pending reasons regeneration gives a branch with no textures yet.
+_TEXTURES_MISSING = "Missing texture publish"
+_TEXTURES_AWAITED = "Awaiting textures"
 SKD_VARIANT_BOX_PREFIX = "skd_variant_"
 PIECES_NODE_NAME = "pieces"
 CONFIG_NODE_TYPE = "sdm223::lnd_componentconfig"
@@ -206,7 +210,7 @@ def _create_pieces_sublayer(
     _set_parm_if_exists(
         sublayer,
         "filepath1",
-        variants.to_hip_expression(pieces, hip_root=hip_asset_root()),
+        variants.portable_expression(pieces, hip_root=hip_asset_root()),
     )
     _mark_managed_variant_node(sublayer, owner_path=owner_path)
     return sublayer
@@ -781,7 +785,7 @@ def _discover_asset_variants_from_shotgrid() -> (
     return geo, mat, warnings
 
 
-def _rebuild_matlib_for_variant(
+def _update_matlib_for_variant(
     matlib: hou.Node,
     *,
     geo_variant: str,
@@ -791,11 +795,66 @@ def _rebuild_matlib_for_variant(
     if not isinstance(matlib, hou.LopNode):
         return
     try:
-        shading.matlib_rebuild(matlib)
+        warnings.extend(shading.matlib_update(matlib))
     except Exception as exc:
         warnings.append(
-            f"MatLib rebuild failed for geo='{geo_variant}' mat='{mat_variant}': {exc}"
+            f"MatLib update failed for geo='{geo_variant}' mat='{mat_variant}': {exc}"
         )
+
+
+def _managed_matlibs(
+    parent: hou.Node, *, owner_path: str
+) -> dict[tuple[str, str], hou.LopNode]:
+    """Regeneration's MatLibs, by the (geometry, material) variant each builds."""
+    return {
+        shading.matlib_variants(node): node
+        for node in parent.children()
+        if isinstance(node, hou.LopNode)
+        and _is_skd_matlib_like(node)
+        and _regeneration_replaces(node, owner_path=owner_path)
+    }
+
+
+def _retire_matlibs(matlibs: Iterable[hou.LopNode]) -> list[str]:
+    """MatLibs whose variant is gone: deleted, unless they hold hand edits."""
+    kept: list[str] = []
+    for matlib in matlibs:
+        if shading.matlib_has_hand_edits(matlib):
+            _release_managed_variant_node(matlib)
+            kept.append(matlib.name())
+        else:
+            matlib.destroy()
+    if not kept:
+        return []
+    return [
+        f"Kept {', '.join(kept)}: their variants are gone, but their materials "
+        "were edited by hand. Copy what you need out of them, then delete them."
+    ]
+
+
+def update_materials(output: hou.Node) -> list[str]:
+    """Bring every MatLib feeding `output` up to its published textures.
+
+    A MatLib regeneration left waiting for textures starts building once they
+    are published. Nothing an artist edited is replaced; what an update could
+    not do comes back for the artist.
+    """
+    notes: list[str] = []
+    for matlib in _feeding_matlibs(output):
+        if _awaiting_textures(matlib) and shading.matlib_has_textures(matlib):
+            _set_pending_state(matlib, pending=False)
+            for material in matlib.outputs():
+                if _awaiting_textures(material):
+                    _set_pending_state(material, pending=False)
+        notes.extend(shading.matlib_update(matlib))
+    return notes
+
+
+def _awaiting_textures(node: hou.Node) -> bool:
+    comment = node.comment()
+    return comment.startswith(SKD_PENDING_COMMENT_PREFIX) and (
+        _TEXTURES_MISSING in comment or _TEXTURES_AWAITED in comment
+    )
 
 
 def _first_managed_geometry_node(
@@ -823,15 +882,6 @@ def material_warnings(output: hou.Node) -> list[str]:
         for matlib in _feeding_matlibs(output)
         for problem in shading.matlib_problems(matlib)
     ]
-
-
-def materials_regenerable(output: hou.Node) -> bool:
-    """Whether regenerating would rebuild every matlib whose materials are out of date."""
-    return all(
-        _regeneration_replaces(matlib, owner_path=output.path())
-        for matlib in _feeding_matlibs(output)
-        if shading.matlib_problems(matlib)
-    )
 
 
 def _feeding_matlibs(output: hou.Node) -> list[hou.LopNode]:
@@ -905,10 +955,14 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     owner_path = output.path()
     config_settings = _config_settings(output)
+    # MatLibs survive: their materials may hold an artist's shaders.
+    kept_matlibs = _managed_matlibs(parent, owner_path=owner_path)
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
     warnings.extend(
         _clear_managed_variant_nodes(
-            parent, keep_paths={output.path()}, owner_path=owner_path
+            parent,
+            keep_paths={output.path(), *(m.path() for m in kept_matlibs.values())},
+            owner_path=owner_path,
         )
     )
 
@@ -944,7 +998,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             parent=parent,
             node_name=geo_name,
             geo_variant=geo_plan.name,
-            source_expression=variants.to_hip_expression(
+            source_expression=variants.portable_expression(
                 geo_plan.source_path,
                 hip_root=plan.hip_root,
             ),
@@ -956,7 +1010,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             pending=not geo_plan.source_exists,
             reason=(
                 f"Missing geometry publish: "
-                f"{variants.to_hip_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
+                f"{variants.portable_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
             ),
         )
 
@@ -974,7 +1028,11 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
                 "material" if single_branch else f"material_{geo_token}_{mat_token}"
             )
 
-            matlib = create_skd_matlib(parent, matlib_name)
+            matlib = kept_matlibs.pop((geo_plan.name, mat_variant), None)
+            if matlib is None:
+                matlib = create_skd_matlib(parent, matlib_name)
+            elif matlib.name() != matlib_name:
+                matlib.setName(matlib_name, unique_name=True)
             _mark_managed_variant_node(matlib, owner_path=owner_path)
             branch_nodes.append(matlib)
             _set_matlib_variant_selection(
@@ -1002,7 +1060,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
                 cmat,
                 pending=combo_missing,
                 reason=(
-                    f"Missing texture publish for geo='{geo_plan.name}' mat='{mat_variant}'"
+                    f"{_TEXTURES_MISSING} for geo='{geo_plan.name}' mat='{mat_variant}'"
                     if geo_plan.source_exists
                     else f"Missing geometry publish for geo='{geo_plan.name}'"
                 ),
@@ -1010,7 +1068,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             _set_pending_state(
                 matlib,
                 pending=not is_texture_published,
-                reason=f"Awaiting textures for geo='{geo_plan.name}' mat='{mat_variant}'",
+                reason=f"{_TEXTURES_AWAITED} for geo='{geo_plan.name}' mat='{mat_variant}'",
             )
 
             mat_y = branch_top_y - 1.4 - mat_index * 1.6
@@ -1019,7 +1077,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
             branch_bottom_y = min(branch_bottom_y, mat_y)
 
             if is_texture_published:
-                _rebuild_matlib_for_variant(
+                _update_matlib_for_variant(
                     matlib,
                     geo_variant=geo_plan.name,
                     mat_variant=mat_variant,
@@ -1038,6 +1096,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     if not branch_outputs:
         raise RuntimeError("Variant graph generation produced no geometry branches")
+    warnings.extend(_retire_matlibs(kept_matlibs.values()))
 
     upstream: hou.Node = branch_outputs[0][1]
     if len(branch_outputs) > 1:

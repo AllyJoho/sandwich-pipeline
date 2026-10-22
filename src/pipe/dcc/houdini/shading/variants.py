@@ -11,6 +11,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT, AssetPaths
+from pipe.core.assembly.pieces import assembly_of, split_from
+from pipe.core.util.paths import get_production_path
+
 USD_EXTENSIONS = frozenset({".usd", ".usda", ".usdc"})
 USD_EXTENSION_ORDER = (".usd", ".usdc", ".usda")
 DEFAULT_GEO_VARIANT = "main"
@@ -55,15 +59,45 @@ def default_geo_source_expression() -> str:
     return geo_source_expression(DEFAULT_GEO_VARIANT)
 
 
-def to_hip_expression(path: Path, *, hip_root: Path) -> str:
-    """Convert a path to `$HIP/...` form when possible."""
+def texture_source_dir(hip_root: Path, geo_variant: str) -> Path:
+    """The folder a geometry variant's material variants are published under.
+
+    A variant split from an assembly is painted as part of that assembly, so it
+    reads the assembly's textures where they are instead of a copy of its own.
+    A child's own variant shares that paint too, unless it was given textures of
+    its own or the child was split from more than one assembly.
+    """
+    own = hip_root / TEX_SOURCE_DIR / geo_variant
+    source = AssetPaths(hip_root).publish_source_variant_usd(geo_variant)
+    assembly = assembly_of(source) if source.is_file() else None
+    if assembly is None and not own.is_dir():
+        assemblies = split_from(hip_root)
+        assembly = next(iter(assemblies)) if len(assemblies) == 1 else None
+    if assembly is None:
+        return own
+    return get_production_path() / assembly / TEX_SOURCE_DIR / DEFAULT_GEOMETRY_VARIANT
+
+
+def published_material_variants(hip_root: Path, geo_variant: str) -> tuple[str, ...]:
+    return _discover_material_variants(texture_source_dir(hip_root, geo_variant))
+
+
+def portable_expression(path: Path, *, hip_root: Path) -> str:
+    """`$HIP/...` for a path under the hip, `$JOB/...` for one elsewhere in production.
+
+    Anything else comes back as it is, for the MatLib's error LOP to report.
+    """
     candidate = path.expanduser()
-    root = hip_root.expanduser()
-    try:
-        relative = candidate.relative_to(root)
-    except ValueError:
-        return candidate.as_posix()
-    return f"$HIP/{relative.as_posix()}"
+    for variable, root in (
+        ("$HIP", hip_root.expanduser()),
+        ("$JOB", get_production_path()),
+    ):
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue
+        return f"{variable}/{relative.as_posix()}"
+    return candidate.as_posix()
 
 
 def node_token(value: str, *, fallback: str = "main") -> str:
@@ -133,7 +167,6 @@ def _discover_build_plan(
 ) -> VariantBuildPlan:
     root = hip_root.expanduser()
     geo_root = root / GEO_SOURCE_DIR
-    tex_root = root / TEX_SOURCE_DIR
 
     declared_geo = _normalize_variants(preferred_geo_variants)
     declared_mat = _normalize_variants(preferred_mat_variants)
@@ -152,7 +185,7 @@ def _discover_build_plan(
     mats_by_geo: dict[str, tuple[str, ...]] = {}
     all_published_mats: set[str] = set()
     for geo_name in geo_names:
-        mat_variants = _discover_material_variants(tex_root / geo_name)
+        mat_variants = published_material_variants(root, geo_name)
         mats_by_geo[geo_name] = mat_variants
         all_published_mats.update(mat_variants)
 
@@ -194,7 +227,7 @@ def _discover_build_plan(
                 )
         elif not published_mats:
             warnings.append(
-                f"No texture publishes found for geometry '{geo_name}' under {tex_root / geo_name}."
+                f"No texture publishes found for geometry '{geo_name}' under {texture_source_dir(root, geo_name)}."
             )
 
         geometry_plans.append(
@@ -210,7 +243,7 @@ def _discover_build_plan(
     return VariantBuildPlan(
         hip_root=root,
         geo_source_dir=geo_root,
-        tex_source_dir=tex_root,
+        tex_source_dir=root / TEX_SOURCE_DIR,
         geometry_variants=tuple(geometry_plans),
         warnings=tuple(warnings),
     )
@@ -246,10 +279,24 @@ def _discover_material_variants(root: Path) -> tuple[str, ...]:
     names = [
         directory.name.strip()
         for directory in sorted(root.iterdir(), key=lambda path: path.name.casefold())
-        if directory.is_dir() and not directory.name.startswith(".")
+        if _is_material_variant(directory)
     ]
     filtered = [name for name in names if name]
     return tuple(sorted(set(filtered), key=str.casefold))
+
+
+def _is_material_variant(directory: Path) -> bool:
+    """A published material variant holds layer folders.
+
+    Artists also drop loose exports beside the variants (`export 9-29`); built
+    as variants, those make materials that stop the whole publish from cooking.
+    """
+    if not directory.is_dir() or directory.name.startswith("."):
+        return False
+    return any(
+        entry.is_dir() and not entry.name.startswith(".")
+        for entry in directory.iterdir()
+    )
 
 
 def _normalize_variants(values: tuple[str, ...] | None) -> tuple[str, ...]:
@@ -312,5 +359,7 @@ __all__ = [
     "material_scope_name",
     "material_scope_path",
     "node_token",
-    "to_hip_expression",
+    "portable_expression",
+    "published_material_variants",
+    "texture_source_dir",
 ]

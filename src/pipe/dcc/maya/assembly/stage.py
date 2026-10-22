@@ -18,12 +18,13 @@ _STAGE_METERS_PER_UNIT = 0.01
 
 
 def stage_shape() -> str | None:
-    """Return the assembly's proxy shape, refusing a scene that has more than one."""
-    shapes = mc.ls(type=_STAGE_SHAPE_TYPE, long=True) or []
+    """Return the assembly's proxy shape, found by the name the split gave it."""
+    shapes = mc.ls(f":{STAGE_SHAPE_NAME}", type=_STAGE_SHAPE_TYPE, long=True) or []
     if len(shapes) > 1:
         raise AssemblyError(
-            f"This scene has {len(shapes)} USD stages and an assembly needs exactly "
-            "one. Delete the stages that do not belong to the assembly."
+            f"This scene has {len(shapes)} USD stages named '{STAGE_SHAPE_NAME}' and "
+            "an assembly needs exactly one. Delete or rename the ones that do not "
+            "belong to the assembly."
         )
     return shapes[0] if shapes else None
 

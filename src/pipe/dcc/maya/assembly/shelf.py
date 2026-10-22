@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import platform
-
 import mayaUsd.ufe
 import ufe
 from env_sg import DB_Config
@@ -24,17 +22,9 @@ _dialog: SplitDialog | None = None
 
 @maya_command(name="split_pieces", label="Split Pieces...", category="assembly")
 def split_pieces() -> None:
-    """Open the Split Pieces plan for the assembly in the open scene (Linux only)."""
+    """Open the Split Pieces plan for the assembly in the open scene."""
     global _dialog
     window = get_main_qt_window()
-    if platform.system() == "Windows":
-        MessageDialog(
-            window,
-            "Splitting runs on Linux: a piece's texture links cannot be made from "
-            "Windows. Open the assembly on a Linux machine.",
-            "Split Pieces",
-        ).exec_()
-        return
     conn = ShotGrid.connect(DB_Config)
     assembly = scene_asset(conn)
     if assembly is None:

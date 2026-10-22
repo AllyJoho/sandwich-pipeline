@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT, AssetPaths
-from pipe.core.assembly.pieces import assembly_of
+from pipe.core.assembly.pieces import assembly_of, split_from
 from pipe.core.util.paths import get_production_path
 
 USD_EXTENSIONS = frozenset({".usd", ".usda", ".usdc"})
@@ -64,11 +64,17 @@ def texture_source_dir(hip_root: Path, geo_variant: str) -> Path:
 
     A variant split from an assembly is painted as part of that assembly, so it
     reads the assembly's textures where they are instead of a copy of its own.
+    A child's own variant shares that paint too, unless it was given textures of
+    its own or the child was split from more than one assembly.
     """
+    own = hip_root / TEX_SOURCE_DIR / geo_variant
     source = AssetPaths(hip_root).publish_source_variant_usd(geo_variant)
     assembly = assembly_of(source) if source.is_file() else None
+    if assembly is None and not own.is_dir():
+        assemblies = split_from(hip_root)
+        assembly = next(iter(assemblies)) if len(assemblies) == 1 else None
     if assembly is None:
-        return hip_root / TEX_SOURCE_DIR / geo_variant
+        return own
     return get_production_path() / assembly / TEX_SOURCE_DIR / DEFAULT_GEOMETRY_VARIANT
 
 

@@ -22,7 +22,6 @@ from pipe.core.asset.paths import (
     AssetPaths,
     production_relative_identifier,
 )
-from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import (
     child_source_problem,
     child_variants,
@@ -31,8 +30,7 @@ from pipe.core.assembly.pieces import (
     split_from,
     variant_list,
 )
-from pipe.core.assembly.textures import link_used_textures, texture_link_problem
-from pipe.core.util.paths import get_production_path, resolve_mapped_path
+from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
 from .main import PublishOptions, publish_component
@@ -116,7 +114,7 @@ def run_headless_publish(
         placed = child_variants(AssetPaths(root).pieces_layer)
         for child_root, variants in placed.items():
             log.info("Publishing %s before its assembly %s", child_root.name, root.name)
-            child = _publish_child(child_root, frozenset(variants), root)
+            child = _publish_child(child_root, frozenset(variants))
             children.append(child)
             if child["errors"]:
                 return _failed_child(root, child, children)
@@ -124,11 +122,9 @@ def run_headless_publish(
         # A child's own model file publishes it too, through the same remedies.
         assemblies = split_from(root)
         if not placed and len(assemblies) == 1:
-            (assembly,) = assemblies
             return _publish_child(
                 root,
                 frozenset(placed_variants(root)),
-                get_production_path() / assembly,
                 variant=variant,
                 asset_name=asset_name,
                 asset_id=asset_id,
@@ -149,13 +145,18 @@ def run_headless_publish(
         fail_on_hook_error=fail_on_hook_error,
     )
     result["children"] = children
-    if publish and len(split_from(root)) > 1 and variant in own_variants(root):
+    if (
+        publish
+        and len(split_from(root)) > 1
+        and variant in own_variants(root)
+        and not AssetPaths(root).publish_textures_variant_dir(variant).is_dir()
+    ):
         _warn(
             result,
-            "VariantTexturesNotLinked",
+            "VariantHasNoTextures",
             f"'{root.name}' was split from more than one assembly, so its "
             f"'{variant}' variant cannot tell whose paint to share and has no "
-            "textures linked. Ask a TD to link them.",
+            "textures. Paint it on its own, or ask a TD.",
         )
     return result
 
@@ -163,7 +164,6 @@ def run_headless_publish(
 def _publish_child(
     child_root: Path,
     placed: frozenset[str],
-    assembly_root: Path,
     *,
     variant: str | None = None,
     asset_name: str | None = None,
@@ -178,20 +178,6 @@ def _publish_child(
     problem = child_source_problem(child_root, required)
     if problem is not None:
         return _refused_child(child_root, "ChildSourceMissing", problem)
-    # A repaint or a piece edit may have moved the tiles a variant uses. A
-    # variant from the child's own model file reads the same paint, unless it
-    # was given textures of its own.
-    shared = {
-        own
-        for own in own_variants(child_root)
-        if texture_link_problem(child_root, own) is None
-    }
-    try:
-        for linked in sorted(placed | shared):
-            link_used_textures(child_root, linked, assembly_root)
-    except (AssemblyError, OSError) as error:
-        log.exception("Could not link the textures of %s", child_root.name)
-        return _refused_child(child_root, "ChildTexturesNotLinked", str(error))
 
     def run(*, regen: bool) -> HeadlessPublishResult:
         return _run_one(

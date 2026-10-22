@@ -36,7 +36,7 @@ def resolve_default_mesh_paths(
         return custom_mesh_path, None, None
 
     variant_path = paths.painter_mesh(variant)
-    # An asset published before it had a `painter/` folder offers its model source.
+    # An asset published before it had `publish/substance` offers its model source.
     fallback_path = paths.publish_source_variant_usd(variant)
     if not fallback_path.exists() and variant == DEFAULT_GEO_VARIANT:
         fallback_path = paths.publish_source_model_usd
@@ -344,8 +344,8 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._geo_variant_radio = QtWidgets.QRadioButton("Published Variant Mesh")
         self._geo_variant_radio.setChecked(True)
         self._geo_variant_radio.setToolTip(
-            "Use the variant's mesh from the asset's painter folder, written by "
-            "every publish."
+            "Use the variant's mesh from the asset's publish/substance folder, "
+            "written by every publish."
         )
         variant_value = QtWidgets.QLabel(self._geo_variant)
         variant_value.setToolTip("Selected geometry variant for this project file.")

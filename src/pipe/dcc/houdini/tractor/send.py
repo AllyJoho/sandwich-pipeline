@@ -37,15 +37,22 @@ CONFIGURE = "tractor_configure"
 DENOISE = "tractor_denoise"
 ENCODE = "tractor_encode_video"
 
-# Sent with the job so the blades find the same Houdini, RenderMan and colour
-# config as the artist's session.
+# Sent with the job so the blades find the same Houdini, RenderMan, MoonRay and
+# colour config as the artist's session. MoonRay's Houdini package sets the
+# ARRAS_*, MOONRAY_*, RDL2_* and REZ_* ones; its Hydra plugin itself is found
+# through HOUDINI_PATH.
 ENV_VARS = (
+    "ARRAS_SESSION_PATH",
     "HOUDINI_PATH",
+    "MOONRAY_CLASS_PATH",
+    "MOONRAY_ROOT",
     "OCIO",
     "PATH",
     "PIXAR_LICENSE_FILE",
     "PXR_AR_DEFAULT_SEARCH_PATH",
     "PXR_PLUGINPATH_NAME",
+    "RDL2_DSO_PATH",
+    "REZ_MOONRAY_ROOT",
     "RFHTREE",
     "RMAN_COLOR_CONFIG_DIR",
     "RMAN_PROCEDURALPATH",

@@ -33,6 +33,7 @@ MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
 
 # Directory names
 BACKUP_DIRNAME = ".backup"
+PAINTER_DIRNAME = "painter"
 PUBLISH_DIRNAME = "publish"
 PUBLISH_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_DIRNAME = "tex"
@@ -52,6 +53,7 @@ PUBLISH_GEO_USD_FILENAME = "geo.usd"
 PUBLISH_MTL_USD_FILENAME = "mtl.usd"
 PUBLISH_PAYLOAD_USD_FILENAME = "payload.usd"
 PIECES_LAYER_FILENAME = "pieces.usda"
+PAINTER_OFFSET_FILENAME = "painter_offset.json"
 
 # Texture naming rule: <material>.<variant>.<map>.<udim>.<ext>
 TEXTURE_NAME_TEMPLATE = "{material}.{variant}.{map}.{udim}"
@@ -106,6 +108,20 @@ class AssetPaths:
     @property
     def publish_source_dir(self) -> Path:
         return self.publish_dir / PUBLISH_SOURCE_DIRNAME
+
+    @property
+    def painter_dir(self) -> Path:
+        """painter/: the meshes Painter projects are made from and reimport."""
+        return self.root / PAINTER_DIRNAME
+
+    def painter_mesh(self, variant: str) -> Path:
+        """painter/<variant>.usd: the variant's model shaped for Painter, by every publish."""
+        return self.painter_dir / f"{variant.strip()}.usd"
+
+    @property
+    def painter_offset(self) -> Path:
+        """painter/painter_offset.json: where the asset's Painter projects expect the mesh."""
+        return self.painter_dir / PAINTER_OFFSET_FILENAME
 
     @property
     def publish_textures_dir(self) -> Path:
@@ -257,6 +273,7 @@ __all__ = [
     "ASSET_BUILDER_FILENAME",
     "MANIFEST_FILENAME",
     "BACKUP_DIRNAME",
+    "PAINTER_DIRNAME",
     "PUBLISH_DIRNAME",
     "PUBLISH_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_DIRNAME",
@@ -264,6 +281,7 @@ __all__ = [
     "PUBLISH_TEXTURES_PREVIEW_DIRNAME",
     "PUBLISH_ASSEMBLY_DIRNAME",
     "PIECES_LAYER_FILENAME",
+    "PAINTER_OFFSET_FILENAME",
     "PUBLISH_SOURCE_MODEL_FILENAME",
     "PUBLISH_ASSET_USD_FILENAME",
     "PUBLISH_GEO_USD_FILENAME",

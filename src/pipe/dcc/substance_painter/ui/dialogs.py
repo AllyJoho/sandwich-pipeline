@@ -35,14 +35,15 @@ def resolve_default_mesh_paths(
     if use_custom_mesh:
         return custom_mesh_path, None, None
 
-    variant_path = paths.publish_source_variant_usd(variant)
-    fallback_path = (
-        paths.publish_source_model_usd if variant == DEFAULT_GEO_VARIANT else None
-    )
+    variant_path = paths.painter_mesh(variant)
+    # An asset published before it had a `painter/` folder offers its model source.
+    fallback_path = paths.publish_source_variant_usd(variant)
+    if not fallback_path.exists() and variant == DEFAULT_GEO_VARIANT:
+        fallback_path = paths.publish_source_model_usd
 
     if variant_path.exists():
         return variant_path, variant_path, fallback_path
-    if fallback_path and fallback_path.exists():
+    if fallback_path.exists():
         return fallback_path, variant_path, fallback_path
     return variant_path, variant_path, fallback_path
 
@@ -343,7 +344,8 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._geo_variant_radio = QtWidgets.QRadioButton("Published Variant Mesh")
         self._geo_variant_radio.setChecked(True)
         self._geo_variant_radio.setToolTip(
-            "Use a published geometry variant from the asset's _src folder."
+            "Use the variant's mesh from the asset's painter folder, written by "
+            "every publish."
         )
         variant_value = QtWidgets.QLabel(self._geo_variant)
         variant_value.setToolTip("Selected geometry variant for this project file.")
@@ -412,7 +414,10 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._update_mesh_status()
 
     def _browse_custom_mesh(self) -> None:
-        base_dir = str(self._paths.publish_source_dir)
+        painter_dir = self._paths.painter_dir
+        base_dir = str(
+            painter_dir if painter_dir.is_dir() else self._paths.publish_source_dir
+        )
         selection, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Select Mesh File",

@@ -33,13 +33,13 @@ MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
 
 # Directory names
 BACKUP_DIRNAME = ".backup"
-PAINTER_DIRNAME = "painter"
 PUBLISH_DIRNAME = "publish"
 PUBLISH_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_DIRNAME = "tex"
 PUBLISH_TEXTURES_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_PREVIEW_DIRNAME = "_preview"
 PUBLISH_ASSEMBLY_DIRNAME = "_asm"
+PUBLISH_SUBSTANCE_DIRNAME = "substance"
 RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
@@ -111,16 +111,16 @@ class AssetPaths:
 
     @property
     def painter_dir(self) -> Path:
-        """painter/: the meshes Painter projects are made from and reimport."""
-        return self.root / PAINTER_DIRNAME
+        """publish/substance/: the meshes Painter projects are made from and reimport."""
+        return self.publish_dir / PUBLISH_SUBSTANCE_DIRNAME
 
     def painter_mesh(self, variant: str) -> Path:
-        """painter/<variant>.usd: the variant's model shaped for Painter, by every publish."""
+        """publish/substance/<variant>.usd: the variant's model shaped for Painter."""
         return self.painter_dir / f"{variant.strip()}.usd"
 
     @property
     def painter_offset(self) -> Path:
-        """painter/painter_offset.json: where the asset's Painter projects expect the mesh."""
+        """publish/substance/painter_offset.json: where Painter projects expect the mesh."""
         return self.painter_dir / PAINTER_OFFSET_FILENAME
 
     @property
@@ -273,13 +273,13 @@ __all__ = [
     "ASSET_BUILDER_FILENAME",
     "MANIFEST_FILENAME",
     "BACKUP_DIRNAME",
-    "PAINTER_DIRNAME",
     "PUBLISH_DIRNAME",
     "PUBLISH_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_DIRNAME",
     "PUBLISH_TEXTURES_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_PREVIEW_DIRNAME",
     "PUBLISH_ASSEMBLY_DIRNAME",
+    "PUBLISH_SUBSTANCE_DIRNAME",
     "PIECES_LAYER_FILENAME",
     "PAINTER_OFFSET_FILENAME",
     "PUBLISH_SOURCE_MODEL_FILENAME",

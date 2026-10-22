@@ -275,10 +275,24 @@ def _discover_material_variants(root: Path) -> tuple[str, ...]:
     names = [
         directory.name.strip()
         for directory in sorted(root.iterdir(), key=lambda path: path.name.casefold())
-        if directory.is_dir() and not directory.name.startswith(".")
+        if _is_material_variant(directory)
     ]
     filtered = [name for name in names if name]
     return tuple(sorted(set(filtered), key=str.casefold))
+
+
+def _is_material_variant(directory: Path) -> bool:
+    """A published material variant holds layer folders.
+
+    Artists also drop loose exports beside the variants (`export 9-29`); built
+    as variants, those make materials that stop the whole publish from cooking.
+    """
+    if not directory.is_dir() or directory.name.startswith("."):
+        return False
+    return any(
+        entry.is_dir() and not entry.name.startswith(".")
+        for entry in directory.iterdir()
+    )
 
 
 def _normalize_variants(values: tuple[str, ...] | None) -> tuple[str, ...]:
